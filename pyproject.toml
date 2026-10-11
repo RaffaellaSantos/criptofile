@@ -1,0 +1,21 @@
+[project]
+name = "criptofile"
+version = "0.1.0"
+description = "Sistema de linha de comando (CLI), para criptografia e integridade de documentos."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "alembic>=1.20.0",
+    "psycopg2-binary>=2.9.13",
+    "pydantic-settings>=2.15.0",
+    "rich>=15.0.0",
+    "rich-argparse>=1.8.0",
+    "sqlalchemy>=2.1.4",
+]
+
+[project.scripts]
+criptofile = "app.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]

@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ps_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-strong!password}
+      POSTGRES_DB: ${POSTGRES_DB:-ps_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+  
+  app:
+    build: .
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+
+volumes:
+  postgres_data:

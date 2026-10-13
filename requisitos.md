@@ -127,53 +127,6 @@ Controlo de Acesso Baseado em Funções (RBAC):
 
 A persistência de metadados e permissões pode ser implementada utilizando uma base de dados relacional leve e cifrada (como SQLite com SQLCipher).
 
-```
--- Tabela de Utilizadores
-CREATE TABLE users (
-    user_id TEXT PRIMARY KEY,
-    username TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    salt TEXT NOT NULL,
-    role TEXT CHECK(role IN ('ADMIN', 'USER')) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Tabela de Metadados dos Ficheiros
-CREATE TABLE files (
-    file_id TEXT PRIMARY KEY,
-    owner_id TEXT NOT NULL,
-    original_name TEXT NOT NULL,
-    sha256_hash TEXT NOT NULL,
-    storage_path TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (owner_id) REFERENCES users(user_id)
-);
-
--- Tabela de Controlo de Acesso e Chaves Cifradas (Envelope Encryption)
-CREATE TABLE file_permissions (
-    permission_id TEXT PRIMARY KEY,
-    file_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    encrypted_dek TEXT NOT NULL, -- DEK do ficheiro cifrada com a KEK deste utilizador
-    can_modify BOOLEAN DEFAULT FALSE,
-    FOREIGN KEY (file_id) REFERENCES files(file_id),
-    FOREIGN KEY (user_id) REFERENCES users(user_id)
-);
-
--- Tabela de Logs de Auditoria
-CREATE TABLE audit_logs (
-    log_id TEXT PRIMARY KEY,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    user_id TEXT,
-    action TEXT NOT NULL, -- LOGIN, ENCRYPT, DECRYPT, MODIFY, SHARE, INTEGRITY_FAIL
-    resource_id TEXT,
-    status TEXT NOT NULL, -- SUCCESS, FAIL, ALERT
-    details TEXT,
-    log_hmac TEXT NOT NULL -- HMAC para garantir a integridade do próprio registo de log
-);
-```
-
-4. Matriz de Atendimento aos Critérios Obrigatórios
 
 Critério Obrigatório |	Componente da Arquitetura | Implementação Técnica
 :-------------------:|:--------------------------:|:---------------------

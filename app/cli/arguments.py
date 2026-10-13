@@ -2,12 +2,15 @@ import argparse
 import logging
 import sys
 import textwrap
-
-import rich_argparse
+from rich.console import Console
+from rich_argparse import RichHelpFormatter
+from rich.panel import Panel
 
 from app.utils.validator import abs_path, define_name, validate_path
+from app.handle.file_cryptography_handle import handle_generate_keys, handle_encrypt, handle_decrypt
 
 logger = logging.getLogger(__name__)
+console = Console()
 
 class ArgumentParserPT(argparse.ArgumentParser):
     """Classe personalizada para traduzir mensagens de erro para português."""
@@ -26,29 +29,82 @@ def print_file_info(args: argparse.Namespace) -> None:
     """Imprime as informações coletadas do arquivo fornecido."""
     path_obj = args.path
     
-    print("\n[+] Informações Iniciais do Arquivo [+]")
-    print(f"Caminho recebido : {path_obj}")
-    print(f"Nome do arquivo  : {define_name(path_obj)}")
-    print(f"Caminho absoluto : {abs_path(path_obj)}")
-    print("----------------------------------------\n")
+    info_text = (
+    f"[bold cyan]Caminho recebido :[/bold cyan] {path_obj}\n"
+    f"[bold cyan]Nome do arquivo  :[/bold cyan] {define_name(path_obj)}\n"
+    f"[bold cyan]Caminho absoluto :[/bold cyan] {abs_path(path_obj)}"
+    )
 
+    console.print(Panel(info_text, title="[bold green]Informações Iniciais do Arquivo[/bold green]", expand=False))
 def build_parser() -> None:
-    """Construi os argumentos a serem passados."""
+    """Constroi os argumentos a serem passados."""
     parser = ArgumentParserPT(prog="criptofile", description=textwrap.dedent("""
-        Projeto: CriptoFile CLI
-        Descrição: Ferramenta de linha de comando (CLI), capaz de receber o caminho de um arquivo, criptografar o arquivo, salvar a chave e verificar a integridade do arquivos.
-        Autores: Adriana Raffaella | Davi Aguiar | Guilherme Moraes | Henrique Furtado
+        [bold green]Projeto:[/bold green] CriptoFile CLI\n
+        [bold green]Descrição:[/bold green] Ferramenta de linha de comando (CLI), capaz de receber o caminho de um arquivo, criptografar o arquivo, salvar a chave e verificar a integridade do arquivos.\n
+        [bold green]Autores:[/bold green] Adriana Raffaella | Davi Aguiar | Guilherme Moraes | Henrique Furtado
     """),
         epilog=textwrap.dedent("""
             Exemplos:
                 criptofile -p ./teste.pdf "Exibe as informações (temporário)."
         """), 
-    formatter_class=rich_argparse.RawDescriptionRichHelpFormatter,
-    add_help=False
+    formatter_class=RichHelpFormatter,
     )
+    
+    subparsers = parser.add_subparsers(dest="command", help="Comandos disponíveis")
 
-    # Caminho do arquivo
-    parser.add_argument(
+    parser_keys = subparsers.add_parser(
+        "genkeys", help="Gera par de chaves RSA",
+        formatter_class=RichHelpFormatter
+    )
+    parser_keys.set_defaults(func=handle_generate_keys)
+
+    parser_enc = subparsers.add_parser(
+            "encrypt", 
+            help="Encripta um ficheiro", 
+            formatter_class=RichHelpFormatter
+    )
+    parser_enc.add_argument(
+            '-p', 
+            '--path', 
+            type=validate_path, 
+            required=True, 
+            help="Caminho do arquivo (PDF)"
+    )
+    parser_enc.add_argument(
+            '-k', 
+            '--key', 
+            type=str, 
+            required=True, 
+            help="Caminho da chave pública (.pem)")
+    parser_enc.set_defaults(func=handle_encrypt)
+
+    parser_dec = subparsers.add_parser(
+            "decrypt", 
+            help="Desencripta um arquivo", 
+            formatter_class=RichHelpFormatter
+    )
+    parser_dec.add_argument(
+            '-p', 
+            '--path', 
+            type=str, 
+            required=True, 
+            help="Caminho do arquivo encriptado (.enc)"
+    )
+    parser_dec.add_argument(
+            '-k', 
+            '--key', 
+            type=str, 
+            required=True, 
+            help="Caminho da chave privada (.pem)"
+    )
+    parser_dec.set_defaults(func=handle_decrypt)
+    
+    parser_info = subparsers.add_parser(
+        "info",
+        help="Exibe as informações iniciais do arquivo",
+        formatter_class=RichHelpFormatter
+    )
+    parser_info.add_argument(
         '-p', 
         '--path', 
         type=validate_path, 
@@ -56,8 +112,7 @@ def build_parser() -> None:
         required=True, 
         metavar="pdf_path"
     )
-
-    parser.set_defaults(func=print_file_info)
+    parser_info.set_defaults(func=print_file_info)
 
     return parser
 

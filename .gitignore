@@ -15,3 +15,4 @@ app.log
 # PDFs de teste dos usuários (montados em /arquivos no container)
 arquivos/*
 !arquivos/README.md
+testes/

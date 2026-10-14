@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "criptofile"
 version = "0.1.0"
@@ -6,12 +10,22 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.20.0",
-    "psycopg2-binary>=2.9.13",
+    "argon2-cffi>=25.1.0",
+    "psycopg[binary]>=3.2",
     "pydantic-settings>=2.15.0",
     "rich>=15.0.0",
     "rich-argparse>=1.8.0",
     "sqlalchemy>=2.1.4",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
 
 [project.scripts]
 criptofile = "app.main:main"

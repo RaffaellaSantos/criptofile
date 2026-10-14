@@ -12,10 +12,6 @@ wheels/
 app.log
 .env
 
-<<<<<<< HEAD
-# PDFs de teste dos usuários (montados em /arquivos no container)
 arquivos/*
 !arquivos/README.md
-=======
->>>>>>> 22e606c257e25e0f175a973319c4166862e8bb53
 testes/

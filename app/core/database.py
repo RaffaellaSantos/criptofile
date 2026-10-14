@@ -7,6 +7,7 @@ from app.core.config import settings
 
 engine = create_engine(settings.DATABASE_URL)
 CONNECT_TIMEOUT = 5  # segundos
+engine = create_engine(settings.DATABASE_URL)
 
 Base = declarative_base()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False)

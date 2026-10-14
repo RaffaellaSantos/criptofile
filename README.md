@@ -16,7 +16,7 @@ A aplicação utiliza criptografia avançada (AES-256-GCM) e um modelo de *Envel
 ## Tecnologias Utilizadas
 
 - **Linguagem:** Python 3.13
-- **Banco de Dados:** PostgreSQL (via SQLAlchemy e psycopg2)
+- **Banco de Dados:** PostgreSQL (via SQLAlchemy e psycopg 3)
 - **Migrações:** Alembic
 - **Gerenciamento de Dependências:** [uv](https://github.com/astral-sh/uv)
 - **Interface CLI:** argparse + [Rich](https://github.com/Textualize/rich)
@@ -48,8 +48,10 @@ Antes de começar, certifique-se de ter instalado em sua máquina:
    POSTGRES_USER=ps_user
    POSTGRES_PASSWORD=senha_super_dificil
    POSTGRES_DB=criptofile_db
-   DATABASE_URL=postgresql://POSTGRES_USER:POSTGRES_PASSWORD@db:5432/POSTGRES_DB
+   POSTGRES_PORT=5432
+   DATABASE_URL=postgresql://ps_user:senha_super_dificil@localhost:5432/criptofile_db
    ```
+   O `DATABASE_URL` é usado pela CLI rodando fora do Docker, por isso aponta para `localhost`. Se já houver um PostgreSQL instalado na máquina usando a porta 5432, troque `POSTGRES_PORT` e a porta do `DATABASE_URL` para outra (ex.: 5433).
 
 3. Suba os containers da aplicação e do banco de dados:
    ```bash
@@ -90,7 +92,24 @@ Caminho absoluto : /home/usuario/caminho/para/seu/arquivo.pdf
 ----------------------------------------
 ```
 
-*(Nota: Outros comandos de encriptação, decriptação e gerenciamento de usuários serão documentados conforme a evolução da CLI).*
+### Gestão de Usuários (Módulo IAM)
+
+As senhas são sempre solicitadas de forma interativa (sem eco no terminal) e nunca passadas como argumento.
+
+```bash
+# Cria o primeiro ADMIN (só funciona com o banco vazio)
+criptofile admin-init -u admin
+
+# Valida as credenciais de um usuário
+criptofile login -u alice
+
+# Operações exclusivas de ADMIN (o --as indica quem executa)
+criptofile user-add  --as admin -u alice -r USER
+criptofile user-role --as admin -u alice -r ADMIN
+criptofile user-list --as admin
+```
+
+*(Nota: Os comandos de encriptação e decriptação serão documentados conforme a evolução da CLI).*
 
 ## Arquitetura
 

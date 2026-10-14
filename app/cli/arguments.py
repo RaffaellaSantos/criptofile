@@ -2,12 +2,20 @@ import argparse
 import logging
 import sys
 import textwrap
-from rich.console import Console
-from rich_argparse import RichHelpFormatter
-from rich.panel import Panel
 
+from rich.console import Console
+from rich.panel import Panel
+from rich_argparse import RichHelpFormatter
+from sqlalchemy.exc import OperationalError
+
+from app.cli.iam_commands import register_iam_commands
+from app.handle.file_cryptography_handle import (
+    handle_decrypt,
+    handle_encrypt,
+    handle_generate_keys,
+)
+from app.iam import IAMError
 from app.utils.validator import abs_path, define_name, validate_path
-from app.handle.file_cryptography_handle import handle_generate_keys, handle_encrypt, handle_decrypt
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -46,6 +54,11 @@ def build_parser() -> None:
         epilog=textwrap.dedent("""
             Exemplos:
                 criptofile -p ./teste.pdf "Exibe as informações (temporário)."
+                criptofile admin-init -u admin "Cria o primeiro ADMIN."
+                criptofile login -u alice "Valida as credenciais."
+                criptofile user-add --as admin -u alice -r USER "Cadastra usuário."
+                criptofile user-role --as admin -u alice -r ADMIN "Altera o papel."
+                criptofile user-list --as admin "Lista os usuários."
         """), 
     formatter_class=RichHelpFormatter,
     )
@@ -108,11 +121,13 @@ def build_parser() -> None:
         '-p', 
         '--path', 
         type=validate_path, 
-        help="Caminho para o arquivo PDF (obrigatório).", 
-        required=True, 
+        help="Caminho para o arquivo PDF.", 
         metavar="pdf_path"
     )
     parser_info.set_defaults(func=print_file_info)
+
+    subparsers = parser.add_subparsers(dest="command", metavar="comando")
+    register_iam_commands(subparsers)
 
     return parser
 
@@ -126,9 +141,25 @@ def run() -> None:
 
     args = parser.parse_args()
 
+    if args.command is None and args.path is None:
+        parser.print_help()
+        sys.exit(0)
+
     if hasattr(args, 'func'):
         try:
             args.func(args)
+        except IAMError as err:
+            logger.error(err)
+            sys.exit(1)
+        except OperationalError as err:
+            logger.debug("Falha de conexão com o banco.", exc_info=err)
+            reason = str(getattr(err, "orig", err)).strip().splitlines()[-1]
+            logger.error(
+                "Não foi possível conectar ao banco de dados. "
+                "Verifique se ele está rodando e se o DATABASE_URL do .env está correto.\n"
+                f"  Motivo: {reason}"
+            )
+            sys.exit(1)
         except ValueError as err:
             logger.error(err)
     else:

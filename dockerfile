@@ -10,4 +10,7 @@ RUN uv sync --frozen --no-cache
 
 COPY . .
 
-CMD ["sh", "-c", "uv run alembic upgrade head && uv run python main.py"]
+# O projeto define o entrypoint `criptofile` (pyproject.toml -> app.main:main).
+# Argumentos passados via `docker compose run app -p ...` chegam como $@.
+ENTRYPOINT ["uv", "run", "criptofile"]
+CMD ["--help"]

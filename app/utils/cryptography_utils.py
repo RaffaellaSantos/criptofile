@@ -5,6 +5,22 @@ from Crypto.PublicKey import RSA
 from Crypto.Random import get_random_bytes
 
 
+def encrypt_with_kek(data: bytes, kek: bytearray) -> bytes:
+    """Encripta dados (como a chave privada) usando AES-GCM e a KEK da sessão."""
+    nonce = get_random_bytes(12)
+    cipher = AES.new(bytes(kek), AES.MODE_GCM, nonce=nonce)
+    ciphertext, tag = cipher.encrypt_and_digest(data)
+    # Formato do arquivo: Nonce (12 bytes) + Tag (16 bytes) + Ciphertext
+    return nonce + tag + ciphertext
+
+def decrypt_with_kek(encrypted_data: bytes, kek: bytearray) -> bytes:
+    """Desencripta os dados lidos do disco usando a KEK da sessão."""
+    nonce = encrypted_data[:12]
+    tag = encrypted_data[12:28]
+    ciphertext = encrypted_data[28:]
+    cipher = AES.new(bytes(kek), AES.MODE_GCM, nonce=nonce)
+    return cipher.decrypt_and_verify(ciphertext, tag)
+
 def generate_priv_pub_key() -> tuple[bytes, bytes]:
     """Gera as chaves públicas e privadas do usuário"""
     key = RSA.generate(2048)

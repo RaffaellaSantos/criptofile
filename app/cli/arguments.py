@@ -5,16 +5,12 @@ import textwrap
 
 from rich.console import Console
 from rich.panel import Panel
-from rich_argparse import RichHelpFormatter
+from rich_argparse import RawDescriptionRichHelpFormatter, RichHelpFormatter
 from sqlalchemy.exc import OperationalError
 
+from app.cli.file_cryptography_commands import register_file_crypography_commands
 from app.cli.iam_commands import register_iam_commands
-from app.handle.file_cryptography_handle import (
-    handle_decrypt,
-    handle_encrypt,
-    handle_generate_keys,
-)
-from app.iam import IAMError
+from app.exceptions.iam_exceptions import IAMError
 from app.utils.validator import abs_path, define_name, validate_path
 
 logger = logging.getLogger(__name__)
@@ -44,73 +40,36 @@ def print_file_info(args: argparse.Namespace) -> None:
     )
 
     console.print(Panel(info_text, title="[bold green]Informações Iniciais do Arquivo[/bold green]", expand=False))
-def build_parser() -> None:
+
+def build_parser():
     """Constroi os argumentos a serem passados."""
-    parser = ArgumentParserPT(prog="criptofile", description=textwrap.dedent("""
-        [bold green]Projeto:[/bold green] CriptoFile CLI\n
-        [bold green]Descrição:[/bold green] Ferramenta de linha de comando (CLI), capaz de receber o caminho de um arquivo, criptografar o arquivo, salvar a chave e verificar a integridade do arquivos.\n
-        [bold green]Autores:[/bold green] Adriana Raffaella | Davi Aguiar | Guilherme Moraes | Henrique Furtado
-    """),
+    parser = ArgumentParserPT(
+        prog="criptofile", 
+        description=textwrap.dedent("""
+            [bold green]Projeto:[/bold green] CriptoFile CLI
+            [bold green]Descrição:[/bold green] Ferramenta de linha de comando (CLI) capaz de receber um arquivo, criptografar, salvar chaves e verificar integridade.
+            [bold green]Autores:[/bold green] Adriana Raffaella | Davi Aguiar | Guilherme Moraes | Henrique Furtado
+        """),
         epilog=textwrap.dedent("""
-            Exemplos:
-                criptofile -p ./teste.pdf "Exibe as informações (temporário)."
-                criptofile admin-init -u admin "Cria o primeiro ADMIN."
-                criptofile login -u alice "Valida as credenciais."
-                criptofile user-add --as admin -u alice -r USER "Cadastra usuário."
-                criptofile user-role --as admin -u alice -r ADMIN "Altera o papel."
-                criptofile user-list --as admin "Lista os usuários."
+            [bold green]Exemplos de Uso:[/bold green]
+
+            [bold blue]Gestão de Usuários (IAM):[/bold blue]
+              criptofile admin-init -u admin                    [dim]# Cria o primeiro ADMIN[/dim]
+              criptofile login -u alice                         [dim]# Valida as credenciais[/dim]
+              criptofile user-add --as admin -u alice -r USER   [dim]# Cadastra novo usuário[/dim]
+              criptofile user-role --as admin -u alice -r ADMIN [dim]# Altera o papel de um usuário[/dim]
+              criptofile user-list --as admin                   [dim]# Lista os usuários cadastrados[/dim]
+
+            [bold blue]Criptografia e Arquivos:[/bold blue]
+              criptofile genkeys -u alice                       [dim]# Gera o par de chaves RSA na sua pasta[/dim]
+              criptofile encrypt -p ./doc.pdf -u alice          [dim]# Encripta um arquivo para você mesmo[/dim]
+              criptofile encrypt -p ./doc.pdf -u alice -t bob   [dim]# Encripta para outro usuário ler (bob)[/dim]
+              criptofile decrypt -p ./doc.enc -u alice          [dim]# Desencripta um arquivo com a sua chave[/dim]
         """), 
-    formatter_class=RichHelpFormatter,
+        formatter_class=RawDescriptionRichHelpFormatter,
     )
     
     subparsers = parser.add_subparsers(dest="command", help="Comandos disponíveis")
-
-    parser_keys = subparsers.add_parser(
-        "genkeys", help="Gera par de chaves RSA",
-        formatter_class=RichHelpFormatter
-    )
-    parser_keys.set_defaults(func=handle_generate_keys)
-
-    parser_enc = subparsers.add_parser(
-            "encrypt", 
-            help="Encripta um ficheiro", 
-            formatter_class=RichHelpFormatter
-    )
-    parser_enc.add_argument(
-            '-p', 
-            '--path', 
-            type=validate_path, 
-            required=True, 
-            help="Caminho do arquivo (PDF)"
-    )
-    parser_enc.add_argument(
-            '-k', 
-            '--key', 
-            type=str, 
-            required=True, 
-            help="Caminho da chave pública (.pem)")
-    parser_enc.set_defaults(func=handle_encrypt)
-
-    parser_dec = subparsers.add_parser(
-            "decrypt", 
-            help="Desencripta um arquivo", 
-            formatter_class=RichHelpFormatter
-    )
-    parser_dec.add_argument(
-            '-p', 
-            '--path', 
-            type=str, 
-            required=True, 
-            help="Caminho do arquivo encriptado (.enc)"
-    )
-    parser_dec.add_argument(
-            '-k', 
-            '--key', 
-            type=str, 
-            required=True, 
-            help="Caminho da chave privada (.pem)"
-    )
-    parser_dec.set_defaults(func=handle_decrypt)
     
     parser_info = subparsers.add_parser(
         "info",
@@ -126,13 +85,13 @@ def build_parser() -> None:
     )
     parser_info.set_defaults(func=print_file_info)
 
-    subparsers = parser.add_subparsers(dest="command", metavar="comando")
     register_iam_commands(subparsers)
+    register_file_crypography_commands(subparsers)
 
     return parser
 
 def run() -> None:
-    """Declara as funções necessárioas para construir a aplicação."""
+    """Declara as funções necessárias para construir a aplicação."""
     parser = build_parser()
 
     if len(sys.argv) == 1:

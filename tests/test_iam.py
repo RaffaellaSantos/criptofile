@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
-from app.iam import (
+from app.service import (
     AuthenticationError,
     AuthorizationError,
     CredentialValidationError,
@@ -21,7 +21,7 @@ from app.iam import (
     UserAlreadyExistsError,
     UserNotFoundError,
 )
-from app.iam import security
+from app.core import security
 
 ADMIN_PW = "Admin12345"
 USER_PW = "Alice12345"

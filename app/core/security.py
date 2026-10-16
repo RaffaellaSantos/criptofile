@@ -13,7 +13,7 @@ import re
 
 from argon2.low_level import Type, hash_secret_raw
 
-from app.iam.exceptions import CredentialValidationError
+from app.exceptions.iam_exceptions import CredentialValidationError
 
 SALT_SIZE = 16
 HASH_LEN = 32

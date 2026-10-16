@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import CheckConstraint, DateTime, String
+from sqlalchemy import CheckConstraint, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -29,6 +29,7 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
     # Hash Argon2id (hex) da senha. A senha nunca é armazenada em texto claro.
     password_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    public_key: Mapped[str] = mapped_column(Text, nullable=True)
     # Salt aleatório de 16 bytes (hex), único por usuário.
     salt: Mapped[str] = mapped_column(String(32), nullable=False)
     role: Mapped[str] = mapped_column(String(5), nullable=False, default=Role.USER.value)

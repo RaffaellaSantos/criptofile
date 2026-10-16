@@ -15,3 +15,4 @@ app.log
 arquivos/*
 !arquivos/README.md
 testes/
+workspace/*

@@ -9,15 +9,15 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DBSession
 
-from app.iam import security
-from app.iam.exceptions import (
+from app.core import security
+from app.core.session import Session, SessionManager
+from app.exceptions.iam_exceptions import (
     AuthenticationError,
     IAMError,
     UserAlreadyExistsError,
     UserNotFoundError,
 )
-from app.iam.models import Role, User
-from app.iam.session import Session, SessionManager
+from app.model.user_model import Role, User
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,10 @@ from contextlib import contextmanager
 from rich.console import Console
 from rich.table import Table
 
-from app.iam import IAMError, IAMService, Role, Session
+from app.core.session import Session
+from app.exceptions.iam_exceptions import IAMError
+from app.model.user_model import Role
+from app.service import IAMService
 from app.utils.validator import validate_str
 
 logger = logging.getLogger(__name__)

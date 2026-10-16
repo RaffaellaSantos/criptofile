@@ -8,8 +8,8 @@ import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from app.iam.exceptions import AuthenticationError, AuthorizationError
-from app.iam.models import Role
+from app.exceptions.iam_exceptions import AuthenticationError, AuthorizationError
+from app.model.user_model import Role
 
 SESSION_TTL = timedelta(minutes=15)
 

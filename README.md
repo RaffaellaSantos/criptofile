@@ -109,7 +109,30 @@ criptofile user-role --as admin -u alice -r ADMIN
 criptofile user-list --as admin
 ```
 
-*(Nota: Os comandos de encriptação e decriptação serão documentados conforme a evolução da CLI).*
+### Motor Criptográfico
+
+Após a criptografia/descriptografia o sistema salva por padrão o arquivo escolhido na pasta do usuário dono do arquivo.
+
+```bash
+#  Gera o par de chaves RSA na sua pasta (workspace/alice/priv.pem)
+criptofile genkeys -u alice
+```
+```bash
+#  Criptografa um arquivo para você mesmo (workspace/alice/doc.pdf)
+criptofile encrypt -p ./doc.pdf -u alice
+```
+
+```bash
+#  Criptografa para outro usuário ler (bob) (workspace/bob/doc.pdf)
+criptofile encrypt -p ./doc.pdf -u alice -t bob
+```
+
+```bash
+#  Descriptografa um arquivo com a sua chave (workspace/alice/doc.enc)
+criptofile decrypt -p ./doc.enc -u alice
+```
+
+_Todo tipo de arquivo pode ser criptografado_
 
 ## Arquitetura
 

@@ -1,7 +1,9 @@
 import os
+
+from Crypto.Cipher import AES, PKCS1_OAEP
 from Crypto.PublicKey import RSA
 from Crypto.Random import get_random_bytes
-from Crypto.Cipher import AES, PKCS1_OAEP
+
 
 def generate_priv_pub_key() -> tuple[bytes, bytes]:
     """Gera as chaves públicas e privadas do usuário"""
@@ -25,8 +27,7 @@ def encrypt(file_path: str, pub_key: bytes) -> str:
     
     out_path = f"{file_path}.enc"
     with open(out_path, 'wb') as file_encrypted:
-        for x in (enc_session_key, chips_aes.nonce, tag, chips_text):
-            file_encrypted.write(x)
+        file_encrypted.writelines((enc_session_key, chips_aes.nonce, tag, chips_text))
     os.remove(file_path)
     return out_path
 

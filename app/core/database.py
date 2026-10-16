@@ -5,9 +5,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.core.config import settings
 
-engine = create_engine(settings.DATABASE_URL)
 CONNECT_TIMEOUT = 5  # segundos
-engine = create_engine(settings.DATABASE_URL)
 
 Base = declarative_base()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False)
@@ -33,6 +31,6 @@ def get_engine() -> Engine:
 
 def init_db() -> None:
     """Conecta ao banco e cria as tabelas que ainda não existem."""
-    import app.iam.models  # noqa: F401  (registra os modelos no metadata)
+    import app.model.user_model  # noqa: F401  (registra os modelos no metadata)
 
     Base.metadata.create_all(bind=get_engine())

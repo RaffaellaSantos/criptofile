@@ -1,0 +1,175 @@
+import os
+from datetime import timedelta
+
+os.environ["DATABASE_URL"] = "sqlite://"
+
+import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.core.database import Base
+from app.service import (
+    AuthenticationError,
+    AuthorizationError,
+    CredentialValidationError,
+    IAMError,
+    IAMService,
+    Role,
+    SessionManager,
+    User,
+    UserAlreadyExistsError,
+    UserNotFoundError,
+)
+from app.core import security
+
+ADMIN_PW = "Admin12345"
+USER_PW = "Alice12345"
+
+
+@pytest.fixture
+def service(monkeypatch):
+    # Parâmetros reduzidos apenas para acelerar os testes.
+    monkeypatch.setattr(security, "TIME_COST", 1)
+    monkeypatch.setattr(security, "MEMORY_COST", 8)
+    monkeypatch.setattr(security, "PARALLELISM", 1)
+
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    svc = IAMService(factory)
+    svc.bootstrap_admin("admin", ADMIN_PW)
+    svc._factory = factory
+    return svc
+
+
+def _admin(service):
+    return service.authenticate("admin", ADMIN_PW)
+
+
+# 01.1 - Armazenamento seguro --------------------------------------------- #
+def test_password_is_not_stored_in_clear_and_salt_is_unique(service):
+    service.register_user(_admin(service), "alice", USER_PW)
+    with service._factory() as db:
+        users = db.scalars(select(User)).all()
+
+    for u in users:
+        assert ADMIN_PW not in u.password_hash and USER_PW not in u.password_hash
+        assert len(bytes.fromhex(u.salt)) == 16
+    assert users[0].salt != users[1].salt
+
+
+def test_same_password_produces_different_hashes():
+    s1, s2 = security.generate_salt(), security.generate_salt()
+    assert security.derive_credentials("Senha12345", s1) != security.derive_credentials("Senha12345", s2)
+
+
+def test_kek_is_derived_and_differs_from_stored_hash(service):
+    session = _admin(service)
+    with service._factory() as db:
+        user = db.scalar(select(User).where(User.username == "admin"))
+    assert len(session.kek) == 32
+    assert bytes(session.kek).hex() != user.password_hash
+    assert "kek" not in repr(session)
+
+
+# 01.2 - Validação de login ------------------------------------------------ #
+def test_login_success(service):
+    session = _admin(service)
+    assert session.role == Role.ADMIN
+    assert service.sessions.validate(session) is session
+
+
+@pytest.mark.parametrize("username,password", [("admin", "errada123"), ("ghost", ADMIN_PW)])
+def test_login_failure_has_generic_message(service, username, password):
+    with pytest.raises(AuthenticationError, match="Usuário ou senha inválidos"):
+        service.authenticate(username, password)
+
+
+def test_logout_invalidates_session_and_wipes_kek(service):
+    session = _admin(service)
+    service.logout(session)
+    assert not any(session.kek)
+    with pytest.raises(AuthenticationError):
+        service.list_users(session)
+
+
+def test_expired_session_is_rejected(service):
+    service.sessions = SessionManager(ttl=timedelta(seconds=-1))
+    session = _admin(service)
+    with pytest.raises(AuthenticationError, match="expirada"):
+        service.list_users(session)
+
+
+def test_forged_session_is_rejected(service):
+    session = _admin(service)
+    other = SessionManager().create(session.user_id, "admin", Role.ADMIN, b"\x00" * 32)
+    with pytest.raises(AuthenticationError):
+        service.list_users(other)
+
+
+# 02.1 - Cadastro apenas por ADMIN ---------------------------------------- #
+def test_admin_can_register_user(service):
+    info = service.register_user(_admin(service), "alice", USER_PW)
+    assert info.role == Role.USER
+    assert service.authenticate("alice", USER_PW).role == Role.USER
+
+
+def test_user_cannot_register_user(service):
+    service.register_user(_admin(service), "alice", USER_PW)
+    alice = service.authenticate("alice", USER_PW)
+    with pytest.raises(AuthorizationError):
+        service.register_user(alice, "bob", "Bob1234567")
+
+
+def test_bootstrap_only_once(service):
+    with pytest.raises(IAMError):
+        service.bootstrap_admin("root", "Root123456")
+
+
+def test_duplicate_username(service):
+    with pytest.raises(UserAlreadyExistsError):
+        service.register_user(_admin(service), "admin", "Outra12345")
+
+
+@pytest.mark.parametrize(
+    "username,password",
+    [("ab", USER_PW), ("bad name", USER_PW), ("carol", "curta1"), ("carol", "semnumeros"), ("carol123", "carol123")],
+)
+def test_credential_policy(service, username, password):
+    with pytest.raises(CredentialValidationError):
+        service.register_user(_admin(service), username, password)
+
+
+# 02.2 - Gestão de acesso apenas por ADMIN -------------------------------- #
+def test_admin_can_change_role(service):
+    admin = _admin(service)
+    service.register_user(admin, "alice", USER_PW)
+    assert service.set_role(admin, "alice", Role.ADMIN).role == Role.ADMIN
+
+
+def test_user_cannot_change_role(service):
+    service.register_user(_admin(service), "alice", USER_PW)
+    alice = service.authenticate("alice", USER_PW)
+    with pytest.raises(AuthorizationError):
+        service.set_role(alice, "alice", Role.ADMIN)
+
+
+def test_cannot_demote_last_admin(service):
+    with pytest.raises(IAMError, match="último ADMIN"):
+        service.set_role(_admin(service), "admin", Role.USER)
+
+
+def test_change_role_of_unknown_user(service):
+    with pytest.raises(UserNotFoundError):
+        service.set_role(_admin(service), "ghost", Role.ADMIN)
+
+
+def test_user_cannot_list_users(service):
+    service.register_user(_admin(service), "alice", USER_PW)
+    alice = service.authenticate("alice", USER_PW)
+    with pytest.raises(AuthorizationError):
+        service.list_users(alice)
+    assert [u.username for u in service.list_users(_admin(service))] == ["admin", "alice"]

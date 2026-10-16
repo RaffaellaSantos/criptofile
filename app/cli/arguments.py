@@ -3,11 +3,18 @@ import logging
 import sys
 import textwrap
 
-import rich_argparse
+from rich.console import Console
+from rich.panel import Panel
+from rich_argparse import RawDescriptionRichHelpFormatter, RichHelpFormatter
+from sqlalchemy.exc import OperationalError
 
+from app.cli.file_cryptography_commands import register_file_crypography_commands
+from app.cli.iam_commands import register_iam_commands
+from app.exceptions.iam_exceptions import IAMError
 from app.utils.validator import abs_path, define_name, validate_path
 
 logger = logging.getLogger(__name__)
+console = Console()
 
 class ArgumentParserPT(argparse.ArgumentParser):
     """Classe personalizada para traduzir mensagens de erro para português."""
@@ -26,43 +33,65 @@ def print_file_info(args: argparse.Namespace) -> None:
     """Imprime as informações coletadas do arquivo fornecido."""
     path_obj = args.path
     
-    print("\n[+] Informações Iniciais do Arquivo [+]")
-    print(f"Caminho recebido : {path_obj}")
-    print(f"Nome do arquivo  : {define_name(path_obj)}")
-    print(f"Caminho absoluto : {abs_path(path_obj)}")
-    print("----------------------------------------\n")
-
-def build_parser() -> None:
-    """Construi os argumentos a serem passados."""
-    parser = ArgumentParserPT(prog="criptofile", description=textwrap.dedent("""
-        Projeto: CriptoFile CLI
-        Descrição: Ferramenta de linha de comando (CLI), capaz de receber o caminho de um arquivo, criptografar o arquivo, salvar a chave e verificar a integridade do arquivos.
-        Autores: Adriana Raffaella | Davi Aguiar | Guilherme Moraes | Henrique Furtado
-    """),
-        epilog=textwrap.dedent("""
-            Exemplos:
-                criptofile -p ./teste.pdf "Exibe as informações (temporário)."
-        """), 
-    formatter_class=rich_argparse.RawDescriptionRichHelpFormatter,
-    add_help=False
+    info_text = (
+    f"[bold cyan]Caminho recebido :[/bold cyan] {path_obj}\n"
+    f"[bold cyan]Nome do arquivo  :[/bold cyan] {define_name(path_obj)}\n"
+    f"[bold cyan]Caminho absoluto :[/bold cyan] {abs_path(path_obj)}"
     )
 
-    # Caminho do arquivo
-    parser.add_argument(
+    console.print(Panel(info_text, title="[bold green]Informações Iniciais do Arquivo[/bold green]", expand=False))
+
+def build_parser():
+    """Constroi os argumentos a serem passados."""
+    parser = ArgumentParserPT(
+        prog="criptofile", 
+        description=textwrap.dedent("""
+            [bold green]Projeto:[/bold green] CriptoFile CLI
+            [bold green]Descrição:[/bold green] Ferramenta de linha de comando (CLI) capaz de receber um arquivo, criptografar, salvar chaves e verificar integridade.
+            [bold green]Autores:[/bold green] Adriana Raffaella | Davi Aguiar | Guilherme Moraes | Henrique Furtado
+        """),
+        epilog=textwrap.dedent("""
+            [bold green]Exemplos de Uso:[/bold green]
+
+            [bold blue]Gestão de Usuários (IAM):[/bold blue]
+              criptofile admin-init -u admin                    [dim]# Cria o primeiro ADMIN[/dim]
+              criptofile login -u alice                         [dim]# Valida as credenciais[/dim]
+              criptofile user-add --as admin -u alice -r USER   [dim]# Cadastra novo usuário[/dim]
+              criptofile user-role --as admin -u alice -r ADMIN [dim]# Altera o papel de um usuário[/dim]
+              criptofile user-list --as admin                   [dim]# Lista os usuários cadastrados[/dim]
+
+            [bold blue]Criptografia e Arquivos:[/bold blue]
+              criptofile genkeys -u alice                       [dim]# Gera o par de chaves RSA na sua pasta[/dim]
+              criptofile encrypt -p ./doc.pdf -u alice          [dim]# Encripta um arquivo para você mesmo[/dim]
+              criptofile encrypt -p ./doc.pdf -u alice -t bob   [dim]# Encripta para outro usuário ler (bob)[/dim]
+              criptofile decrypt -p ./doc.enc -u alice          [dim]# Desencripta um arquivo com a sua chave[/dim]
+        """), 
+        formatter_class=RawDescriptionRichHelpFormatter,
+    )
+    
+    subparsers = parser.add_subparsers(dest="command", help="Comandos disponíveis")
+    
+    parser_info = subparsers.add_parser(
+        "info",
+        help="Exibe as informações iniciais do arquivo",
+        formatter_class=RichHelpFormatter
+    )
+    parser_info.add_argument(
         '-p', 
         '--path', 
         type=validate_path, 
-        help="Caminho para o arquivo PDF (obrigatório).", 
-        required=True, 
+        help="Caminho para o arquivo PDF.", 
         metavar="pdf_path"
     )
+    parser_info.set_defaults(func=print_file_info)
 
-    parser.set_defaults(func=print_file_info)
+    register_iam_commands(subparsers)
+    register_file_crypography_commands(subparsers)
 
     return parser
 
 def run() -> None:
-    """Declara as funções necessárioas para construir a aplicação."""
+    """Declara as funções necessárias para construir a aplicação."""
     parser = build_parser()
 
     if len(sys.argv) == 1:
@@ -71,9 +100,25 @@ def run() -> None:
 
     args = parser.parse_args()
 
+    if args.command is None and args.path is None:
+        parser.print_help()
+        sys.exit(0)
+
     if hasattr(args, 'func'):
         try:
             args.func(args)
+        except IAMError as err:
+            logger.error(err)
+            sys.exit(1)
+        except OperationalError as err:
+            logger.debug("Falha de conexão com o banco.", exc_info=err)
+            reason = str(getattr(err, "orig", err)).strip().splitlines()[-1]
+            logger.error(
+                "Não foi possível conectar ao banco de dados. "
+                "Verifique se ele está rodando e se o DATABASE_URL do .env está correto.\n"
+                f"  Motivo: {reason}"
+            )
+            sys.exit(1)
         except ValueError as err:
             logger.error(err)
     else:

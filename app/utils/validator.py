@@ -16,7 +16,7 @@ def validate_str(value: str="") -> str:
     return clean_str
 
 def validate_path(value: str) -> Path:
-    """Valiida se o caminho existe, se é um arquivo e se é um pdf."""
+    """Valiida se o caminho existe, se é um arquivo"""
     logger.debug(f"Validando caminho do arquivo: {value}")
     path = Path(value)
 
@@ -25,9 +25,6 @@ def validate_path(value: str) -> Path:
     
     if not path.is_file():
         raise argparse.ArgumentTypeError(f"[Erro]: '{path}' é um diretório, esperava-se um arquivo.")
-    
-    if path.suffix.lower() != '.pdf':
-        raise argparse.ArgumentTypeError(f"[Erro]: O arquivo precisa ser um PDF. Você forneceu '{path.suffix}'. ")
     
     return path
 

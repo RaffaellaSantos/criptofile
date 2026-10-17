@@ -1,5 +1,6 @@
 """Módulo de Excessões"""
 
+from app.exceptions.audit_exceptions import AuditError, AuditIntegrityViolationError
 from app.exceptions.file_cryptography_exceptions import (
     FileNotFoundError,
     IntegrityError,
@@ -16,6 +17,8 @@ from app.exceptions.iam_exceptions import (
 )
 
 __all__ = [
+    "AuditError",
+    "AuditIntegrityViolationError",
     "AuthenticationError",
     "AuthorizationError",
     "CredentialValidationError",

@@ -2,6 +2,7 @@ import argparse
 import getpass
 import logging
 from contextlib import contextmanager
+from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
@@ -16,11 +17,23 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 
+def _run_migrations() -> None:
+    """Aplica as migrações pendentes do Alembic (fonte única de verdade do schema)."""
+    from alembic import command
+    from alembic.config import Config
+
+    alembic_ini = Path(__file__).resolve().parents[2] / "alembic.ini"
+    command.upgrade(Config(str(alembic_ini)), "head")
+
+
 def _service() -> IAMService:
     # Importação tardia: o banco só é acessado pelos comandos que precisam dele.
-    from app.core.database import SessionLocal, init_db
+    from app.core.database import SessionLocal, get_engine
 
-    init_db()
+    _run_migrations()
+    # Cria o engine e o vincula ao SessionLocal (o bind é preguiçoso; sem
+    # esta chamada a sessão é criada sem destino e falha no primeiro uso).
+    get_engine()
     return IAMService(SessionLocal)
 
 

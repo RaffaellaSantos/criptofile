@@ -8,6 +8,7 @@ from rich.panel import Panel
 from rich_argparse import RawDescriptionRichHelpFormatter, RichHelpFormatter
 from sqlalchemy.exc import OperationalError
 
+from app.cli.audit_commands import register_audit_commands
 from app.cli.file_cryptography_commands import register_file_crypography_commands
 from app.cli.iam_commands import register_iam_commands
 from app.exceptions.iam_exceptions import IAMError
@@ -59,13 +60,18 @@ def build_parser():
               criptofile user-add --as admin -u alice -r USER   [dim]# Cadastra novo usuário[/dim]
               criptofile user-role --as admin -u alice -r ADMIN [dim]# Altera o papel de um usuário[/dim]
               criptofile user-list --as admin                   [dim]# Lista os usuários cadastrados[/dim]
+              criptofile audit-report --as admin                [dim]# Relatório de logs (apenas ADMIN)[/dim]
 
             [bold blue]Criptografia e Arquivos:[/bold blue]
               criptofile genkeys -u alice                       [dim]# Gera o par de chaves RSA na sua pasta[/dim]
               criptofile encrypt -p ./doc.pdf -u alice          [dim]# Encripta um arquivo para você mesmo[/dim]
               criptofile encrypt -p ./doc.pdf -u alice -t bob   [dim]# Encripta para outro usuário ler (bob)[/dim]
               criptofile decrypt -p ./doc.enc -u alice          [dim]# Desencripta um arquivo com a sua chave[/dim]
-        """), 
+              criptofile share -p ./doc.enc -u alice -t bob     [dim]# Concede acesso a bob (read ou modify)[/dim]
+              criptofile revoke -p ./doc.enc -u alice -t bob    [dim]# Revoga o acesso de bob (só o dono)[/dim]
+              criptofile file-list -u alice                     [dim]# Lista arquivos acessíveis por alice[/dim]
+              criptofile verify -p ./doc.enc -u alice           [dim]# Confere a integridade sem descriptografar[/dim]
+        """),
         formatter_class=RawDescriptionRichHelpFormatter,
     )
     
@@ -77,16 +83,18 @@ def build_parser():
         formatter_class=RichHelpFormatter
     )
     parser_info.add_argument(
-        '-p', 
-        '--path', 
-        type=validate_path, 
-        help="Caminho para o arquivo PDF.", 
+        '-p',
+        '--path',
+        type=validate_path,
+        required=True,
+        help="Caminho para o arquivo PDF.",
         metavar="pdf_path"
     )
     parser_info.set_defaults(func=print_file_info)
 
     register_iam_commands(subparsers)
     register_file_crypography_commands(subparsers)
+    register_audit_commands(subparsers)
 
     return parser
 

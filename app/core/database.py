@@ -27,10 +27,3 @@ def get_engine() -> Engine:
     )
     SessionLocal.configure(bind=engine)
     return engine
-
-
-def init_db() -> None:
-    """Conecta ao banco e cria as tabelas que ainda não existem."""
-    import app.model.user_model  # noqa: F401  (registra os modelos no metadata)
-
-    Base.metadata.create_all(bind=get_engine())

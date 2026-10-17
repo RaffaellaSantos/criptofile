@@ -15,7 +15,8 @@ services:
       timeout: 3s
       retries: 10
   
-  app:
+  migrate:
+    image: criptofile-app:local
     build:
       context: .
       dockerfile: dockerfile
@@ -24,8 +25,40 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL}
+    entrypoint: ["uv", "run", "alembic"]
+    command: ["upgrade", "head"]
+    restart: "no"
+
+  app:
+    image: criptofile-app:local
+    build:
+      context: .
+      dockerfile: dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
     volumes:
       - ./arquivos:/arquivos
+
+  dbgate:
+    image: dbgate/dbgate:alpine
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      CONNECTIONS: pg1
+      LABEL_pg1: Postgres
+      ENGINE_pg1: postgres@dbgate-plugin-postgres
+      SERVER_pg1: db
+      USER_pg1: ${POSTGRES_USER:-ps_user}
+      PASSWORD_pg1: ${POSTGRES_PASSWORD:-strong!password}
+      DATABASE_pg1: ${POSTGRES_DB:-ps_db}
+    ports:
+      - "${DBGATE_PORT:-3005}:3000"
 
 volumes:
   postgres_data:

@@ -43,7 +43,7 @@ MAX_LOGIN_FAILURES = 3  # bloqueio a partir da 4ª falha na janela
 
 
 def _utcnow() -> datetime:
-    """Agora em UTC como datetime naive (o SQLite devolve timestamps sem fuso)."""
+    """Agora em UTC como datetime naive (padrão interno do serviço)."""
     return datetime.now(UTC).replace(tzinfo=None)
 
 
@@ -158,7 +158,13 @@ class IAMService:
         for event in events:
             if event.status == AuditStatus.SUCCESS.value:
                 break
-            failures.append(event.timestamp)
+            ts = event.timestamp
+            if ts.tzinfo is not None:
+                # A coluna é DateTime(timezone=True), então o SQLite devolve o
+                # offset gravado (+00:00); normaliza para UTC naive para poder
+                # comparar com _utcnow() (mesmo tratamento de _canonical()).
+                ts = ts.astimezone(UTC).replace(tzinfo=None)
+            failures.append(ts)
         return failures
 
     def _check_brute_force(self, user: User) -> None:

@@ -16,3 +16,16 @@ arquivos/*
 !arquivos/README.md
 testes/
 workspace/*
+# Chave HMAC do log de auditoria
+.audit_key
+
+# IDE
+.idea/
+
+# Testes
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Ferramentas de lint
+.ruff_cache/

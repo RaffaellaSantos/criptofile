@@ -1,9 +1,26 @@
-import os
+import hashlib
 
 from Crypto.Cipher import AES, PKCS1_OAEP
 from Crypto.PublicKey import RSA
 from Crypto.Random import get_random_bytes
 
+
+def generate_dek() -> bytes:
+    """Gera uma DEK (Data Encryption Key) AES-256 aleatória por arquivo."""
+    return get_random_bytes(32)
+
+
+def sha256_bytes(data: bytes) -> str:
+    """Hash SHA-256 (hex) do conteúdo em memória."""
+    return hashlib.sha256(data).hexdigest()
+
+def sha256_file(file_path: str) -> str:
+    """Hash SHA-256 (hex) do conteúdo de um arquivo em disco."""
+    digest = hashlib.sha256()
+    with open(file_path, "rb") as plain_file:
+        for chunk in iter(lambda: plain_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 def encrypt_with_kek(data: bytes, kek: bytearray) -> bytes:
     """Encripta dados (como a chave privada) usando AES-GCM e a KEK da sessão."""
@@ -27,44 +44,16 @@ def generate_priv_pub_key() -> tuple[bytes, bytes]:
     priv_key, pub_key = key.export_key(), key.publickey().export_key()
     return priv_key, pub_key
 
-def encrypt(file_path: str, pub_key: bytes) -> str:
-    """Criptografa o arquivo utilizando a chave pública"""
-    with open(file_path, 'rb') as enc_file:
-        data_enc = enc_file.read()
+def wrap_dek_with_public_key(dek: bytes, pub_key: bytes) -> bytes:
+    """Envolve a DEK com RSA-OAEP usando a chave pública do usuário alvo.
 
+    Usada quando o alvo da cifragem não é o próprio usuário da sessão
+    (a KEK do destinatário nunca é conhecida pelo remetente).
+    """
     public_rsa = RSA.import_key(pub_key)
-    session_key = get_random_bytes(32)
+    return PKCS1_OAEP.new(public_rsa).encrypt(dek)
 
-    chips_rsa = PKCS1_OAEP.new(public_rsa)
-    enc_session_key = chips_rsa.encrypt(session_key)
-
-    chips_aes = AES.new(session_key, AES.MODE_GCM)
-    chips_text, tag = chips_aes.encrypt_and_digest(data_enc)
-    
-    out_path = f"{file_path}.enc"
-    with open(out_path, 'wb') as file_encrypted:
-        file_encrypted.writelines((enc_session_key, chips_aes.nonce, tag, chips_text))
-    os.remove(file_path)
-    return out_path
-
-def decrypt(file_path: str, priv_key: bytes) -> str:
-    """Descriptografa o arquivo utilizando a chave privada"""
-
+def unwrap_dek_with_private_key(wrapped_dek: bytes, priv_key: bytes) -> bytes:
+    """Reverte o envolvimento RSA-OAEP da DEK com a chave privada do usuário."""
     priv_key_rsa = RSA.import_key(priv_key)
-    with open(file_path, 'rb') as file_encrypted:
-        enc_session_key = file_encrypted.read(priv_key_rsa.size_in_bytes())
-        nonce = file_encrypted.read(16)
-        tag = file_encrypted.read(16)
-        ciphertext = file_encrypted.read()
-
-    chips_rsa = PKCS1_OAEP.new(priv_key_rsa)
-    session_key = chips_rsa.decrypt(enc_session_key)
-
-    chips_aes = AES.new(session_key, AES.MODE_GCM, nonce)
-    data = chips_aes.decrypt_and_verify(ciphertext, tag)
-    
-    out_path = file_path[:-4] if file_path.endswith('.enc') else f"{file_path}.dec"
-    with open(out_path, 'wb') as file_decrypted:
-        file_decrypted.write(data)
-    os.remove(file_path)
-    return out_path
+    return PKCS1_OAEP.new(priv_key_rsa).decrypt(wrapped_dek)

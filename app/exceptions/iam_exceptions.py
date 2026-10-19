@@ -6,6 +6,10 @@ class AuthenticationError(IAMError):
     """Credenciais inválidas ou sessão inexistente/expirada."""
 
 
+class AccountLockedError(AuthenticationError):
+    """Conta temporariamente bloqueada por excesso de falhas de login (força bruta)."""
+
+
 class AuthorizationError(IAMError):
     """Usuário autenticado sem permissão para a operação."""
 

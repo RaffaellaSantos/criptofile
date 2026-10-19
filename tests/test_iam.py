@@ -1,5 +1,5 @@
 import os
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 os.environ["DATABASE_URL"] = "sqlite://"
 
@@ -10,6 +10,10 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.service import (
+    AccountLockedError,
+    AuditAction,
+    AuditLog,
+    AuditStatus,
     AuthenticationError,
     AuthorizationError,
     CredentialValidationError,
@@ -21,14 +25,18 @@ from app.service import (
     UserAlreadyExistsError,
     UserNotFoundError,
 )
+from app.service.audit_service import AuditService
 from app.core import security
 
 ADMIN_PW = "Admin12345"
 USER_PW = "Alice12345"
 
+# Chave fixa de teste, evita que os testes criem .audit_key no diretório atual.
+TEST_HMAC_KEY = bytes(range(32))
+
 
 @pytest.fixture
-def service(monkeypatch):
+def service(monkeypatch, tmp_path):
     # Parâmetros reduzidos apenas para acelerar os testes.
     monkeypatch.setattr(security, "TIME_COST", 1)
     monkeypatch.setattr(security, "MEMORY_COST", 8)
@@ -39,7 +47,8 @@ def service(monkeypatch):
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
-    svc = IAMService(factory)
+    audit = AuditService(factory, hmac_key=TEST_HMAC_KEY, key_file=str(tmp_path / ".audit_key"))
+    svc = IAMService(factory, audit_service=audit)
     svc.bootstrap_admin("admin", ADMIN_PW)
     svc._factory = factory
     return svc
@@ -173,3 +182,68 @@ def test_user_cannot_list_users(service):
     with pytest.raises(AuthorizationError):
         service.list_users(alice)
     assert [u.username for u in service.list_users(_admin(service))] == ["admin", "alice"]
+
+
+# 05.1 - Detecção de força bruta ------------------------------------------- #
+def _fails(service, n, username="admin"):
+    for _ in range(n):
+        with pytest.raises(AuthenticationError):
+            service.authenticate(username, "errada123")
+
+
+def test_lock_blocks_after_four_consecutive_failures(service):
+    _fails(service, 4)
+    # A conta fica bloqueada mesmo quando a senha informada é a correta.
+    with pytest.raises(AccountLockedError, match="bloqueada"):
+        service.authenticate("admin", ADMIN_PW)
+
+
+def test_no_lock_below_threshold(service):
+    _fails(service, 3)
+    assert service.authenticate("admin", ADMIN_PW).username == "admin"
+
+
+def test_security_alert_recorded_once_per_outburst(service):
+    _fails(service, 4)
+    _fails(service, 1)  # tentativa bloqueada não deve gerar novo alerta
+    with service._factory() as db:
+        alerts = db.scalars(
+            select(AuditLog).where(
+                AuditLog.action_type == AuditAction.SECURITY_ALERT.value
+            )
+        ).all()
+    assert len(alerts) == 1
+    assert alerts[0].username == "admin"
+    assert "forca_bruta" in alerts[0].details
+
+
+def test_successful_login_resets_counter(service):
+    _fails(service, 3)
+    service.authenticate("admin", ADMIN_PW)  # SUCCESS zera o contador
+    _fails(service, 3)
+    # As 3 falhas novas não somam com as antigas: ainda abaixo do limiar.
+    assert service.authenticate("admin", ADMIN_PW).username == "admin"
+
+
+def test_lock_expires_after_window(service):
+    for _ in range(4):
+        service.audit.record(
+            AuditAction.LOGIN,
+            username="admin",
+            status=AuditStatus.FAIL,
+            details={"reason": "senha incorreta"},
+            timestamp=datetime.now(UTC) - timedelta(seconds=61),
+        )
+    # Todas as falhas saíram da janela de 60s: o login volta a funcionar.
+    assert service.authenticate("admin", ADMIN_PW).username == "admin"
+
+
+def test_unknown_user_never_locks_or_alerts(service):
+    _fails(service, 4, username="ghost")
+    with service._factory() as db:
+        alerts = db.scalars(
+            select(AuditLog).where(
+                AuditLog.action_type == AuditAction.SECURITY_ALERT.value
+            )
+        ).all()
+    assert alerts == []

@@ -255,7 +255,11 @@ class IAMService:
             role=role.value,
         )
         with self._db() as db:
-            if db.scalar(select(User.user_id).where(User.username == username)):
+            # Comparação sem distinção de maiúsculas: "Bob" e "bob" dividiriam
+            # o mesmo workspace em sistemas de arquivos case-insensitive.
+            if db.scalar(
+                select(User.user_id).where(func.lower(User.username) == username.lower())
+            ):
                 raise UserAlreadyExistsError(f"O usuário '{username}' já existe.")
             db.add(user)
             try:

@@ -7,16 +7,12 @@ autogeradas e execução da API usem a mesma definição de schema.
 
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import MetaData, engine_from_config, pool
 
-from alembic import context
+# Registra explicitamente os módulos de modelos no metadata do SQLAlchemy.
 from app.core.config import settings
 from app.core.database import Base
-
-# Registra explicitamente os módulos de modelos no metadata do SQLAlchemy.
-import app.model.audit_log_model  # noqa: F401
-import app.model.file_model  # noqa: F401
-import app.model.user_model  # noqa: F401
 
 config = context.config
 

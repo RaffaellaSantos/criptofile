@@ -2,7 +2,15 @@ import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, LargeBinary, String, Text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -47,6 +55,12 @@ class File(Base):
     # Caminho onde o .enc foi gravado (informativo; o file_id embutido no
     # arquivo mantém a referência mesmo que ele seja movido).
     encrypted_path: Mapped[str] = mapped_column(Text, nullable=False)
+    # Controle de concorrência otimista: toda alteração (update, share,
+    # revoke) incrementa a versão com compare-and-swap; uma operação que leu
+    # uma versão desatualizada é recusada em vez de sobrescrever a outra.
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
@@ -72,7 +86,9 @@ class FilePermission(Base):
         CheckConstraint(
             "permission IN ('READ', 'MODIFY')", name="ck_file_permissions_permission"
         ),
-        CheckConstraint("wrap_alg IN ('KEK', 'RSA')", name="ck_file_permissions_wrap_alg"),
+        CheckConstraint(
+            "wrap_alg IN ('KEK', 'RSA')", name="ck_file_permissions_wrap_alg"
+        ),
     )
 
     file_id: Mapped[str] = mapped_column(

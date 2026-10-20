@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import CheckConstraint, DateTime, Index, String, Text
+from sqlalchemy import CheckConstraint, DateTime, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -27,6 +27,8 @@ class AuditAction(StrEnum):
     SECURITY_ALERT = "SECURITY_ALERT"
     INTEGRITY_VIOLATION = "INTEGRITY_VIOLATION"
     AUDIT_REPORT = "AUDIT_REPORT"
+    # Conclusão de uma gravação interrompida (queda do processo).
+    RECOVERY = "RECOVERY"
 
 
 class AuditStatus(StrEnum):
@@ -45,6 +47,7 @@ class AuditLog(Base):
     __table_args__ = (
         CheckConstraint("status IN ('SUCCESS', 'FAIL')", name="ck_audit_log_status"),
         Index("ix_audit_log_timestamp", "timestamp"),
+        UniqueConstraint("prev_hmac", name="uq_audit_log_prev_hmac"),
     )
 
     event_id: Mapped[str] = mapped_column(
@@ -72,6 +75,12 @@ class AuditLog(Base):
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
     # HMAC-SHA256 (hex) de todos os campos do registro.
     signature_hmac: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Encadeamento: assinatura do evento anterior (ou AUDIT_GENESIS no
+    # primeiro), coberta pela assinatura deste. Apagar um evento do meio
+    # deixa o seguinte apontando para uma assinatura inexistente. UNIQUE
+    # impede bifurcar a cadeia em gravações concorrentes. Nulo apenas em
+    # registros anteriores ao encadeamento.
+    prev_hmac: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     def __repr__(self) -> str:
         return (

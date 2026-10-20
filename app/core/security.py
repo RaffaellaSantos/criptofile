@@ -26,7 +26,16 @@ PARALLELISM = 4
 
 PASSWORD_MIN_LEN = 8
 PASSWORD_MAX_LEN = 128
-USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
+# O username vira nome de diretório (workspace/<username>): começa e termina
+# com letra ou número porque o Windows descarta pontos finais ("abc.." viraria
+# "abc") e nomes como "..." não são diretórios comuns.
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,30}[A-Za-z0-9]$")
+# Nomes de dispositivo reservados do Windows não podem ser diretórios.
+RESERVED_USERNAMES = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {f"com{i}" for i in range(1, 10)}
+    | {f"lpt{i}" for i in range(1, 10)}
+)
 
 
 def generate_salt() -> bytes:
@@ -64,8 +73,11 @@ def validate_username(username: str) -> str:
     username = username.strip()
     if not USERNAME_PATTERN.fullmatch(username):
         raise CredentialValidationError(
-            "Username deve ter de 3 a 32 caracteres (letras, números, '_', '.' ou '-')."
+            "Username deve ter de 3 a 32 caracteres (letras, números, '_', '.' ou '-'), "
+            "começando e terminando com letra ou número."
         )
+    if username.lower() in RESERVED_USERNAMES:
+        raise CredentialValidationError(f"'{username}' é um nome reservado do sistema.")
     return username
 
 
@@ -77,7 +89,5 @@ def validate_password(password: str, username: str) -> None:
         )
     if password.lower() == username.lower():
         raise CredentialValidationError("A senha não pode ser igual ao username.")
-    if not (
-        any(c.isalpha() for c in password) and any(c.isdigit() for c in password)
-    ):
+    if not (any(c.isalpha() for c in password) and any(c.isdigit() for c in password)):
         raise CredentialValidationError("A senha deve conter letras e números.")

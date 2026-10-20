@@ -32,7 +32,9 @@ class User(Base):
     public_key: Mapped[str] = mapped_column(Text, nullable=True)
     # Salt aleatório de 16 bytes (hex), único por usuário.
     salt: Mapped[str] = mapped_column(String(32), nullable=False)
-    role: Mapped[str] = mapped_column(String(5), nullable=False, default=Role.USER.value)
+    role: Mapped[str] = mapped_column(
+        String(5), nullable=False, default=Role.USER.value
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )

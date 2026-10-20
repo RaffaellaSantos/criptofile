@@ -2,6 +2,8 @@
 
 from app.exceptions.audit_exceptions import AuditError, AuditIntegrityViolationError
 from app.exceptions.file_cryptography_exceptions import (
+    ConcurrentModificationError,
+    FileAlreadyExistsError,
     FileNotFoundError,
     IntegrityError,
     InvalidKeyError,
@@ -21,7 +23,9 @@ __all__ = [
     "AuditIntegrityViolationError",
     "AuthenticationError",
     "AuthorizationError",
+    "ConcurrentModificationError",
     "CredentialValidationError",
+    "FileAlreadyExistsError",
     "FileNotFoundError",
     "IAMError",
     "IntegrityError",

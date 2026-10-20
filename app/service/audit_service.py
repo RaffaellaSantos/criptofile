@@ -5,6 +5,13 @@ HMAC-SHA256. A assinatura cobre todos os campos do registro; qualquer edição
 posterior (de timestamp, usuário, status, etc.) fica detectável por
 `verify_integrity()`, atendendo ao requisito de log à prova de adulteração.
 
+Os eventos formam uma cadeia: cada um assina também a assinatura do anterior
+(`prev_hmac`). Apagar um evento do meio do log quebra o elo do seguinte e
+também é detectado. A ponta da cadeia é registrada fora do banco (arquivo
+`.audit_key.head`, autenticado por HMAC): remover os eventos mais recentes
+deixa a ponta registrada apontando para um evento inexistente. Limite
+conhecido: restaurar uma cópia antiga desse arquivo junto com o truncamento.
+
 A chave do HMAC:
   - vem de `AUDIT_HMAC_KEY` no `.env` (hex), quando definida;
   - caso contrário, é gerada uma única vez e persistida em `.audit_key`
@@ -12,27 +19,36 @@ A chave do HMAC:
     continue possível entre execuções.
 """
 
+import contextlib
 import hmac
 import json
 import logging
 import os
+import socket
+import tempfile
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from secrets import token_hex
 
-import socket
-from sqlalchemy import select
+from sqlalchemy import exists, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DBSession
+from sqlalchemy.orm import aliased
 
-from app.core.config import settings
+from app.core.config import data_dir, settings
 from app.exceptions.audit_exceptions import AuditError
 from app.model.audit_log_model import AuditAction, AuditLog, AuditStatus
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_KEY_FILE = ".audit_key"
+# Marcador devolvido por verify_integrity quando os eventos mais recentes somem.
+AUDIT_TRUNCATED = "log-truncado"
 KEY_BYTES = 32  # HMAC-SHA256
+# Elo do primeiro evento encadeado (não é uma assinatura válida de nenhum evento).
+AUDIT_GENESIS = "0" * 64
+CHAIN_RETRIES = 5
 
 
 class AuditService:
@@ -40,10 +56,14 @@ class AuditService:
         self,
         session_factory: Callable[[], DBSession],
         hmac_key: bytes | None = None,
-        key_file: str = DEFAULT_KEY_FILE,
+        key_file: str | None = None,
+        head_file: str | None = None,
     ):
         self._db = session_factory
-        self._key_file = key_file
+        self._key_file = key_file or str(data_dir() / DEFAULT_KEY_FILE)
+        # Ponta da cadeia guardada fora do banco: remover os eventos mais
+        # recentes (que não têm sucessor para acusar a falta) também é detectado.
+        self._head_file = head_file or f"{self._key_file}.head"
         self._hmac_key = hmac_key if hmac_key is not None else self._load_key()
 
     # ------------------------------------------------------------------ #
@@ -64,8 +84,7 @@ class AuditService:
             return key
 
         if os.path.exists(self._key_file):
-            with open(self._key_file, encoding="ascii") as f:
-                return bytes.fromhex(f.read().strip())
+            return self._read_key_file()
 
         # A chave usada pelo HMAC é SEMPRE a forma decodificada (32 bytes),
         # idêntica ao caminho de leitura acima; gerar e assinar com o texto
@@ -77,10 +96,26 @@ class AuditService:
                 f.write(hex_key)
         except FileExistsError:
             # Outro processo criou o arquivo entre o exists() e o open().
-            with open(self._key_file, encoding="ascii") as f:
-                return bytes.fromhex(f.read().strip())
-        logger.info("AUDIT_KEY: nova chave de assinatura criada em '%s'.", self._key_file)
+            return self._read_key_file()
+        logger.info(
+            "AUDIT_KEY: nova chave de assinatura criada em '%s'.", self._key_file
+        )
         return bytes.fromhex(hex_key)
+
+    def _read_key_file(self) -> bytes:
+        """Lê a chave persistida, rejeitando arquivos corrompidos."""
+        try:
+            with open(self._key_file, encoding="ascii") as f:
+                key = bytes.fromhex(f.read().strip())
+        except (UnicodeDecodeError, ValueError) as e:
+            raise AuditError(
+                f"O arquivo de chave '{self._key_file}' está corrompido (hex inválido)."
+            ) from e
+        if len(key) != KEY_BYTES:
+            raise AuditError(
+                f"O arquivo de chave '{self._key_file}' deve conter {KEY_BYTES} bytes em hex."
+            )
+        return key
 
     # ------------------------------------------------------------------ #
     # Registro de eventos
@@ -104,33 +139,125 @@ class AuditService:
         if timestamp is None:
             timestamp = datetime.now(UTC)
 
-        event = AuditLog(
-            event_id=str(uuid.uuid4()),
-            user_id=user_id,
-            username=username,
-            action_type=str(action_type),
-            resource_id=resource_id,
-            status=str(status),
-            ip_address=ip_address,
-            hostname=hostname,
-            timestamp=timestamp,
-            details=self._serialize_details(details),
-            signature_hmac="",  # preenchido a seguir
-        )
-        event.signature_hmac = self._sign(event)
+        serialized_details = self._serialize_details(details)
 
-        with self._db() as db:
-            db.add(event)
-            # commit() expira os atributos do objeto; guardamos os valores
-            # que ainda precisamos antes disso apenas para o log de debug.
-            logged_action, logged_status = event.action_type, event.status
-            logged_user, logged_resource = username, resource_id
-            db.commit()
+        # O evento é encadeado à ponta atual da cadeia. Se outro processo
+        # gravar na mesma ponta ao mesmo tempo, a constraint UNIQUE de
+        # prev_hmac rejeita um dos dois, que tenta de novo na nova ponta.
+        for _ in range(CHAIN_RETRIES):
+            event = AuditLog(
+                event_id=str(uuid.uuid4()),
+                user_id=user_id,
+                username=username,
+                action_type=str(action_type),
+                resource_id=resource_id,
+                status=str(status),
+                ip_address=ip_address,
+                hostname=hostname,
+                timestamp=timestamp,
+                details=serialized_details,
+                signature_hmac="",  # preenchido a seguir
+            )
+            with self._db() as db:
+                event.prev_hmac = self._chain_head(db)
+                event.signature_hmac = signature = self._sign(event)
+                db.add(event)
+                try:
+                    db.commit()
+                except IntegrityError:
+                    db.rollback()
+                    continue
+            self._write_head(signature)
+            break
+        else:
+            raise AuditError(
+                "Não foi possível encadear o evento de auditoria (concorrência)."
+            )
 
         logger.debug(
             "AUDIT: %s (%s) user=%s resource=%s",
-            logged_action, logged_status, logged_user, logged_resource,
+            action_type,
+            status,
+            username,
+            resource_id,
         )
+
+    def _head_mac(self, signature: str) -> str:
+        return hmac.new(
+            self._hmac_key, f"head|{signature}".encode(), "sha256"
+        ).hexdigest()
+
+    def _write_head(self, signature: str) -> None:
+        """Registra a ponta atual da cadeia (troca atômica do arquivo).
+
+        Falha aqui não perde o evento (já gravado no banco): só enfraquece a
+        detecção de truncamento, por isso vira aviso.
+        """
+        registered = self._read_head()
+        if registered is not None and not self._head_is_valid(*registered):
+            # O alarme de truncamento é persistente: novos eventos não podem
+            # sobrescrever a evidência de que a ponta anterior sumiu do banco.
+            logger.error(
+                "AUDIT_TRUNCATED: a ponta registrada do log não existe mais; o registro "
+                "da ponta foi mantido como evidência (veja o relatório de auditoria)."
+            )
+            return
+        tmp_path = None
+        try:
+            directory = os.path.dirname(os.path.abspath(self._head_file))
+            fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".audit_head-")
+            with os.fdopen(fd, "w", encoding="ascii") as head:
+                head.write(f"{signature} {self._head_mac(signature)}")
+            os.replace(tmp_path, self._head_file)
+            tmp_path = None
+        except OSError as e:
+            logger.warning(
+                "AUDIT_HEAD: não foi possível registrar a ponta do log: %s", e
+            )
+        finally:
+            if tmp_path is not None:
+                with contextlib.suppress(OSError):
+                    os.remove(tmp_path)
+
+    def _head_is_valid(self, signature: str, mac: str) -> bool:
+        """MAC confere e a assinatura registrada existe no banco."""
+        if not hmac.compare_digest(mac, self._head_mac(signature)):
+            return False
+        with self._db() as db:
+            return (
+                db.scalar(
+                    select(AuditLog.event_id).where(
+                        AuditLog.signature_hmac == signature
+                    )
+                )
+                is not None
+            )
+
+    def _read_head(self) -> tuple[str, str] | None:
+        """(assinatura, mac) da ponta registrada; None se nunca foi registrada."""
+        try:
+            with open(self._head_file, encoding="ascii") as head:
+                parts = head.read().split()
+        except FileNotFoundError:
+            return None
+        except (OSError, UnicodeDecodeError):
+            return ("", "")
+        return (parts[0], parts[1]) if len(parts) == 2 else ("", "")
+
+    @staticmethod
+    def _chain_head(db: DBSession) -> str:
+        """Assinatura do último evento encadeado (que nenhum outro referencia)."""
+        successor = aliased(AuditLog)
+        head = db.scalar(
+            select(AuditLog.signature_hmac)
+            .where(
+                AuditLog.prev_hmac.is_not(None),
+                ~exists().where(successor.prev_hmac == AuditLog.signature_hmac),
+            )
+            .order_by(AuditLog.timestamp.desc())
+            .limit(1)
+        )
+        return head or AUDIT_GENESIS
 
     @staticmethod
     def _serialize_details(details: dict | None) -> str | None:
@@ -139,7 +266,9 @@ class AuditService:
         return json.dumps(details, ensure_ascii=False, sort_keys=True)
 
     def _sign(self, event: AuditLog) -> str:
-        return hmac.new(self._hmac_key, self._canonical(event).encode(), "sha256").hexdigest()
+        return hmac.new(
+            self._hmac_key, self._canonical(event).encode(), "sha256"
+        ).hexdigest()
 
     @staticmethod
     def _canonical(event: AuditLog) -> str:
@@ -152,20 +281,23 @@ class AuditService:
         ts = event.timestamp
         if ts.tzinfo is not None:
             ts = ts.astimezone(UTC).replace(tzinfo=None)
-        return "|".join(
-            [
-                event.event_id,
-                ts.isoformat(),
-                event.user_id or "",
-                event.username or "",
-                event.action_type,
-                event.resource_id or "",
-                event.status,
-                event.ip_address or "",
-                event.hostname or "",
-                event.details or "",
-            ]
-        )
+        fields = [
+            event.event_id,
+            ts.isoformat(),
+            event.user_id or "",
+            event.username or "",
+            event.action_type,
+            event.resource_id or "",
+            event.status,
+            event.ip_address or "",
+            event.hostname or "",
+            event.details or "",
+        ]
+        # O elo da cadeia também é assinado (registros anteriores ao
+        # encadeamento não têm o campo e seguem verificáveis).
+        if event.prev_hmac is not None:
+            fields.append(event.prev_hmac)
+        return "|".join(fields)
 
     # ------------------------------------------------------------------ #
     # Leitura para o relatório (Requisito 05.3)
@@ -206,13 +338,40 @@ class AuditService:
         forged: list[str] = []
         with self._db() as db:
             events = db.scalars(select(AuditLog).order_by(AuditLog.timestamp)).all()
+        signatures = {event.signature_hmac for event in events}
         for event in events:
             if not hmac.compare_digest(self._sign(event), event.signature_hmac):
                 logger.error(
                     "AUDIT_TAMPER: evento '%s' (%s) foi adulterado.",
-                    event.event_id, event.action_type,
+                    event.event_id,
+                    event.action_type,
                 )
                 forged.append(event.event_id)
+            elif (
+                event.prev_hmac not in (None, AUDIT_GENESIS)
+                and event.prev_hmac not in signatures
+            ):
+                # O elo aponta para um evento que não existe mais: o registro
+                # imediatamente anterior a este foi apagado do log.
+                logger.error(
+                    "AUDIT_GAP: o evento anterior a '%s' (%s) foi removido do log.",
+                    event.event_id,
+                    event.action_type,
+                )
+                forged.append(event.event_id)
+
+        registered = self._read_head()
+        if registered is not None:
+            signature, mac = registered
+            if (
+                not hmac.compare_digest(mac, self._head_mac(signature))
+                or signature not in signatures
+            ):
+                logger.error(
+                    "AUDIT_TRUNCATED: a ponta registrada do log não existe mais no banco: "
+                    "os eventos mais recentes foram removidos (ou o registro da ponta foi adulterado)."
+                )
+                forged.append(AUDIT_TRUNCATED)
         return forged
 
     # ------------------------------------------------------------------ #
@@ -248,6 +407,7 @@ class AuditService:
                     "hostname": event.hostname,
                     "details": json.loads(event.details) if event.details else None,
                     "signature_hmac": event.signature_hmac,
+                    "prev_hmac": event.prev_hmac,
                 }
                 for event in events
             ],
@@ -265,7 +425,10 @@ class AuditService:
         return "\n".join(self._cef_line(event) for event in events)
 
     def _cef_line(self, event: AuditLog) -> str:
-        if event.action_type in (AuditAction.SECURITY_ALERT, AuditAction.INTEGRITY_VIOLATION):
+        if event.action_type in (
+            AuditAction.SECURITY_ALERT,
+            AuditAction.INTEGRITY_VIOLATION,
+        ):
             severity = self.CEF_SEVERITY_ALERT
         elif event.status == AuditStatus.FAIL:
             severity = self.CEF_SEVERITY_FAIL

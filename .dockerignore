@@ -8,3 +8,15 @@ build/
 dist/
 wheels/
 app.log
+
+# Dados locais e segredos nunca vão para a imagem: chaves privadas dos
+# usuários, chave HMAC da auditoria e arquivos de trabalho.
+workspace/
+.audit_key
+.audit_key.head
+.audit_head-*
+arquivos/
+.pytest_cache/
+.coverage
+htmlcov/
+tests/

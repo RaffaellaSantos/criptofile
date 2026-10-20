@@ -18,6 +18,8 @@ testes/
 workspace/*
 # Chave HMAC do log de auditoria
 .audit_key
+.audit_key.head
+.audit_head-*
 
 # IDE
 .idea/

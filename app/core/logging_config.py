@@ -1,7 +1,17 @@
 import json
 import logging
 import logging.config
+import re
 from typing import ClassVar
+
+from app.core.config import data_dir
+
+# Controles C0 e DEL, exceto quebra de linha e tabulação (usadas nas mensagens).
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def _escape_control_chars(text: str) -> str:
+    return _CONTROL_CHARS.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
 
 
 class ColorFormatter(logging.Formatter):
@@ -26,7 +36,13 @@ class ColorFormatter(logging.Formatter):
     def format(self, record):
         log_fmt = self.FORMATS.get(record.levelno)
         formatter = logging.Formatter(log_fmt)
-        return formatter.format(record)
+        # Mensagens carregam entradas do usuário (usernames tentados, nomes de
+        # arquivo): caracteres de controle como ESC são exibidos escapados para
+        # não injetarem sequências ANSI no terminal de quem lê os logs.
+        safe = logging.makeLogRecord(record.__dict__)
+        safe.msg = _escape_control_chars(record.getMessage())
+        safe.args = None
+        return formatter.format(safe)
 
 class JSONFormatter(logging.Formatter):
     """Formatter que gera logs em formato JSON para o arquivo."""
@@ -68,7 +84,7 @@ def setup_logging():
                 'class': 'logging.FileHandler',
                 'formatter': 'json_formatter',
                 'level': logging.DEBUG,
-                'filename': 'app.log',
+                'filename': str(data_dir() / 'app.log'),
                 'encoding': 'utf8'
             }
         },

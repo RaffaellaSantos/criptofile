@@ -41,8 +41,13 @@ services:
         condition: service_completed_successfully
     environment:
       DATABASE_URL: ${DATABASE_URL}
+      AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:-}
+      # workspace/ (chaves privadas), .audit_key e app.log precisam sobreviver
+      # entre execuções: cada `docker compose run --rm` cria um container novo.
+      CRIPTOFILE_HOME: /data
     volumes:
       - ./arquivos:/arquivos
+      - criptofile_data:/data
 
   dbgate:
     image: dbgate/dbgate:alpine
@@ -62,3 +67,4 @@ services:
 
 volumes:
   postgres_data:
+  criptofile_data:

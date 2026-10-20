@@ -23,7 +23,9 @@ def test_session_role_helpers():
 
 def test_revoke_all_wipes_every_kek():
     manager = SessionManager()
-    sessions = [manager.create(f"u{i}", f"user{i}", Role.USER, b"\x07" * 32) for i in range(3)]
+    sessions = [
+        manager.create(f"u{i}", f"user{i}", Role.USER, b"\x07" * 32) for i in range(3)
+    ]
     manager.revoke_all()
     assert all(not any(s.kek) for s in sessions)
 
@@ -64,7 +66,9 @@ def test_get_engine_sets_postgres_connect_timeout(fresh_engine, monkeypatch):
         captured.update(kwargs)
         return create_engine("sqlite://")
 
-    monkeypatch.setattr(settings, "DATABASE_URL", "postgresql+psycopg2://u:p@localhost:1/db")
+    monkeypatch.setattr(
+        settings, "DATABASE_URL", "postgresql+psycopg2://u:p@localhost:1/db"
+    )
     monkeypatch.setattr(database, "create_engine", fake_create_engine)
     database.get_engine()
     assert captured["connect_args"] == {"connect_timeout": database.CONNECT_TIMEOUT}

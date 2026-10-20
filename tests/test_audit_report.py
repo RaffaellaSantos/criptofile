@@ -37,7 +37,9 @@ def factory():
 
 @pytest.fixture
 def audit(factory, tmp_path):
-    return AuditService(factory, hmac_key=TEST_HMAC_KEY, key_file=str(tmp_path / ".audit_key"))
+    return AuditService(
+        factory, hmac_key=TEST_HMAC_KEY, key_file=str(tmp_path / ".audit_key")
+    )
 
 
 @pytest.fixture
@@ -111,17 +113,22 @@ def test_report_events_are_signed(iam, audit, factory):
     assert audit.verify_integrity() == []
     with factory() as db:
         event = db.scalar(
-            select(AuditLog).where(AuditLog.action_type == AuditAction.AUDIT_REPORT.value)
+            select(AuditLog).where(
+                AuditLog.action_type == AuditAction.AUDIT_REPORT.value
+            )
         )
         event.details = '{"adulterado": true}'
         db.commit()
 
     assert audit.verify_integrity() != []
 
+
 # Exportação em JSON/CEF (seção 2.3 da especificação) ---------------------- #
 def test_export_json_roundtrip(audit):
     audit.record(
-        AuditAction.FILE_ENCRYPT, username="alice", resource_id="a.pdf",
+        AuditAction.FILE_ENCRYPT,
+        username="alice",
+        resource_id="a.pdf",
         details={"reason": "ok", "hash": "ab12"},
     )
 
@@ -137,10 +144,14 @@ def test_export_json_roundtrip(audit):
 
 def test_export_cef_line_and_fields(audit):
     audit.record(
-        AuditAction.FILE_ENCRYPT, username="alice", resource_id="a.pdf",
+        AuditAction.FILE_ENCRYPT,
+        username="alice",
+        resource_id="a.pdf",
         details={"reason": "ok"},
     )
-    audit.record(AuditAction.INTEGRITY_VIOLATION, username="bob", status=AuditStatus.FAIL)
+    audit.record(
+        AuditAction.INTEGRITY_VIOLATION, username="bob", status=AuditStatus.FAIL
+    )
 
     lines = audit.export_cef(audit.list_events()).splitlines()
     encrypt = next(l for l in lines if "FILE_ENCRYPT" in l)
@@ -158,12 +169,16 @@ def test_export_cef_line_and_fields(audit):
 
 def test_export_cef_escapes_special_chars(audit):
     audit.record(
-        AuditAction.FILE_ACCESS, username="eve",
-        resource_id="weird=name.pdf", details={"x": "a=b\nc"},
+        AuditAction.FILE_ACCESS,
+        username="eve",
+        resource_id="weird=name.pdf",
+        details={"x": "a=b\nc"},
     )
 
     line = next(
-        l for l in audit.export_cef(audit.list_events()).splitlines() if "FILE_ACCESS" in l
+        l
+        for l in audit.export_cef(audit.list_events()).splitlines()
+        if "FILE_ACCESS" in l
     )
     assert "cs1=weird\\=name.pdf" in line
     # A quebra de linha nos detalhes é escapada (o evento deve caber em 1 linha).

@@ -100,12 +100,16 @@ class IAMService:
             unlock_in = max(
                 1,
                 math.ceil(
-                    (failures[MAX_LOGIN_FAILURES] + BRUTE_FORCE_WINDOW - _utcnow()).total_seconds()
+                    (
+                        failures[MAX_LOGIN_FAILURES] + BRUTE_FORCE_WINDOW - _utcnow()
+                    ).total_seconds()
                 ),
             )
             logger.error(
                 "LOGIN BLOCKED: '%s' bloqueada por força bruta (%d falhas em %ds).",
-                user.username, len(failures), BRUTE_FORCE_WINDOW.total_seconds(),
+                user.username,
+                len(failures),
+                BRUTE_FORCE_WINDOW.total_seconds(),
             )
             raise AccountLockedError(
                 "Conta temporariamente bloqueada por excesso de falhas de login. "
@@ -176,7 +180,9 @@ class IAMService:
             return
         logger.error(
             "SECURITY ALERT: força bruta em '%s' (%d falhas em %ds).",
-            user.username, len(failures), BRUTE_FORCE_WINDOW.total_seconds(),
+            user.username,
+            len(failures),
+            BRUTE_FORCE_WINDOW.total_seconds(),
         )
         self.audit.record(
             AuditAction.SECURITY_ALERT,
@@ -230,7 +236,9 @@ class IAMService:
         info = self._create_user(username, password, Role(role))
         logger.info(
             "USER_CREATE: '%s' (%s) criado por '%s'.",
-            info.username, info.role, admin.username,
+            info.username,
+            info.role,
+            admin.username,
         )
         self.audit.record(
             AuditAction.USER_CREATE,
@@ -258,7 +266,9 @@ class IAMService:
             # Comparação sem distinção de maiúsculas: "Bob" e "bob" dividiriam
             # o mesmo workspace em sistemas de arquivos case-insensitive.
             if db.scalar(
-                select(User.user_id).where(func.lower(User.username) == username.lower())
+                select(User.user_id).where(
+                    func.lower(User.username) == username.lower()
+                )
             ):
                 raise UserAlreadyExistsError(f"O usuário '{username}' já existe.")
             db.add(user)
@@ -266,7 +276,9 @@ class IAMService:
                 db.commit()
             except IntegrityError as err:
                 db.rollback()
-                raise UserAlreadyExistsError(f"O usuário '{username}' já existe.") from err
+                raise UserAlreadyExistsError(
+                    f"O usuário '{username}' já existe."
+                ) from err
             db.refresh(user)
             return _to_info(user)
 
@@ -285,7 +297,9 @@ class IAMService:
 
             if user.role == Role.ADMIN and role != Role.ADMIN:
                 admins = db.scalar(
-                    select(func.count()).select_from(User).where(User.role == Role.ADMIN.value)
+                    select(func.count())
+                    .select_from(User)
+                    .where(User.role == Role.ADMIN.value)
                 )
                 if admins <= 1:
                     raise IAMError("Não é possível rebaixar o último ADMIN do sistema.")
@@ -298,7 +312,10 @@ class IAMService:
 
         logger.info(
             "ROLE_CHANGE: '%s' %s -> %s por '%s'.",
-            info.username, old_role, info.role, admin.username,
+            info.username,
+            old_role,
+            info.role,
+            admin.username,
         )
         self.audit.record(
             AuditAction.USER_ROLE_CHANGE,

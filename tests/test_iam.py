@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.core import security
 from app.core.database import Base
 from app.service import (
     AccountLockedError,
@@ -26,7 +27,6 @@ from app.service import (
     UserNotFoundError,
 )
 from app.service.audit_service import AuditService
-from app.core import security
 
 ADMIN_PW = "Admin12345"
 USER_PW = "Alice12345"
@@ -47,7 +47,9 @@ def service(monkeypatch, tmp_path):
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
-    audit = AuditService(factory, hmac_key=TEST_HMAC_KEY, key_file=str(tmp_path / ".audit_key"))
+    audit = AuditService(
+        factory, hmac_key=TEST_HMAC_KEY, key_file=str(tmp_path / ".audit_key")
+    )
     svc = IAMService(factory, audit_service=audit)
     svc.bootstrap_admin("admin", ADMIN_PW)
     svc._factory = factory
@@ -73,7 +75,9 @@ def test_password_is_not_stored_in_clear_and_salt_is_unique(service):
 
 def test_same_password_produces_different_hashes():
     s1, s2 = security.generate_salt(), security.generate_salt()
-    assert security.derive_credentials("Senha12345", s1) != security.derive_credentials("Senha12345", s2)
+    assert security.derive_credentials("Senha12345", s1) != security.derive_credentials(
+        "Senha12345", s2
+    )
 
 
 def test_kek_is_derived_and_differs_from_stored_hash(service):
@@ -92,7 +96,9 @@ def test_login_success(service):
     assert service.sessions.validate(session) is session
 
 
-@pytest.mark.parametrize("username,password", [("admin", "errada123"), ("ghost", ADMIN_PW)])
+@pytest.mark.parametrize(
+    "username,password", [("admin", "errada123"), ("ghost", ADMIN_PW)]
+)
 def test_login_failure_has_generic_message(service, username, password):
     with pytest.raises(AuthenticationError, match="Usuário ou senha inválidos"):
         service.authenticate(username, password)
@@ -146,7 +152,13 @@ def test_duplicate_username(service):
 
 @pytest.mark.parametrize(
     "username,password",
-    [("ab", USER_PW), ("bad name", USER_PW), ("carol", "curta1"), ("carol", "semnumeros"), ("carol123", "carol123")],
+    [
+        ("ab", USER_PW),
+        ("bad name", USER_PW),
+        ("carol", "curta1"),
+        ("carol", "semnumeros"),
+        ("carol123", "carol123"),
+    ],
 )
 def test_credential_policy(service, username, password):
     with pytest.raises(CredentialValidationError):
@@ -155,7 +167,19 @@ def test_credential_policy(service, username, password):
 
 @pytest.mark.parametrize(
     "username",
-    ["abc..", ".abc", "-abc", "abc_", "...", "con", "NUL", "com1", "Lpt9", "a" * 33, "../etc"],
+    [
+        "abc..",
+        ".abc",
+        "-abc",
+        "abc_",
+        "...",
+        "con",
+        "NUL",
+        "com1",
+        "Lpt9",
+        "a" * 33,
+        "../etc",
+    ],
 )
 def test_username_must_be_a_safe_directory_name(service, username):
     """O username vira workspace/<username>: nomes que o SO trataria de forma
@@ -166,11 +190,13 @@ def test_username_must_be_a_safe_directory_name(service, username):
 
 @pytest.mark.parametrize("username", ["ana", "a.b", "user_1", "Ana-Maria", "console"])
 def test_valid_usernames_are_accepted(service, username):
-    assert service.register_user(_admin(service), username, USER_PW).username == username
+    assert (
+        service.register_user(_admin(service), username, USER_PW).username == username
+    )
 
 
 def test_username_uniqueness_ignores_case(service):
-    """"Bob" e "bob" dividiriam o workspace em sistemas case-insensitive."""
+    """ "Bob" e "bob" dividiriam o workspace em sistemas case-insensitive."""
     admin = _admin(service)
     service.register_user(admin, "bob", USER_PW)
     with pytest.raises(UserAlreadyExistsError):
@@ -224,7 +250,10 @@ def test_user_cannot_list_users(service):
     alice = service.authenticate("alice", USER_PW)
     with pytest.raises(AuthorizationError):
         service.list_users(alice)
-    assert [u.username for u in service.list_users(_admin(service))] == ["admin", "alice"]
+    assert [u.username for u in service.list_users(_admin(service))] == [
+        "admin",
+        "alice",
+    ]
 
 
 def test_promoted_user_gains_admin_powers(service):

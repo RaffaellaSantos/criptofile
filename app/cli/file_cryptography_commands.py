@@ -81,7 +81,9 @@ def handle_decrypt(args: argparse.Namespace) -> None:
             )
         except FileCryptofileError as e:
             logger.error(f"Erro interno de criptografia: {e}")
-            console.print(f"[bold red]Erro de Criptografia:[/bold red] {escape(str(e))}")
+            console.print(
+                f"[bold red]Erro de Criptografia:[/bold red] {escape(str(e))}"
+            )
             raise SystemExit(1) from e
 
 

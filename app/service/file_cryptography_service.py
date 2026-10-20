@@ -21,7 +21,11 @@ from app.exceptions import (
 from app.exceptions.file_cryptography_exceptions import (
     ConcurrentModificationError,
     FileAlreadyExistsError,
+)
+from app.exceptions.file_cryptography_exceptions import (
     FileNotFoundError as CryptoFileNotFoundError,
+)
+from app.exceptions.file_cryptography_exceptions import (
     PermissionError as FilePermissionError,
 )
 from app.exceptions.iam_exceptions import UserNotFoundError
@@ -57,6 +61,7 @@ STALE_PLAINTEXT_SECONDS = 600
 from app.utils.validator import abs_path
 
 logger = logging.getLogger(__name__)
+
 
 # Formato do arquivo cifrado (.enc):
 #   file_id (36 bytes ASCII UUID) + Nonce (12) + Tag (16) + Ciphertext
@@ -113,7 +118,9 @@ def _temp_file(directory: str, kind: str = "enc") -> Iterator[tuple[BinaryIO, st
     "key" (chave privada) ou "plain" (texto claro ainda não validado). É o que
     permite recuperar uma gravação interrompida e limpar texto claro órfão.
     """
-    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=f"{TEMP_PREFIX}{kind}-", suffix=".tmp")
+    fd, tmp_path = tempfile.mkstemp(
+        dir=directory, prefix=f"{TEMP_PREFIX}{kind}-", suffix=".tmp"
+    )
     try:
         with os.fdopen(fd, "wb") as tmp_file:
             yield tmp_file, tmp_path
@@ -194,7 +201,9 @@ def _installed_by_recovery(tmp_path: str, error: OSError) -> bool:
     o instalou no lugar do .enc (recuperação de gravação travada). Arquivo e
     banco estão coerentes; desfazer a operação agora os dessincronizaria."""
     if isinstance(error, FileNotFoundError) and not os.path.exists(tmp_path):
-        logger.info("RECOVERED_BY_READER: '%s' já foi instalado por outro processo.", tmp_path)
+        logger.info(
+            "RECOVERED_BY_READER: '%s' já foi instalado por outro processo.", tmp_path
+        )
         return True
     return False
 
@@ -239,8 +248,15 @@ class _Access:
 def _grant_snapshot(grant: FilePermission) -> dict:
     return {
         column: getattr(grant, column)
-        for column in ("file_id", "user_id", "permission", "wrapped_dek",
-                       "wrap_alg", "granted_by", "created_at")
+        for column in (
+            "file_id",
+            "user_id",
+            "permission",
+            "wrapped_dek",
+            "wrap_alg",
+            "granted_by",
+            "created_at",
+        )
     }
 
 
@@ -280,7 +296,9 @@ class FileCryptoService:
         with self._db() as db:
             user = db.scalar(select(User).where(User.username == session.username))
             if not user:
-                raise UserNotFoundError(f"Usuário '{session.username}' não encontrado no banco.")
+                raise UserNotFoundError(
+                    f"Usuário '{session.username}' não encontrado no banco."
+                )
             old_public_key = user.public_key
             has_public_key = bool(old_public_key)
 
@@ -302,7 +320,9 @@ class FileCryptoService:
             # A chave privada vai primeiro para um temporário 0600: a antiga só
             # é substituída depois que a nova pública estiver gravada no banco,
             # de modo que uma falha não deixa o par dessincronizado.
-            tmp_path = _write_temp_file(workspace, encrypt_with_kek(priv, session.kek), kind="key")
+            tmp_path = _write_temp_file(
+                workspace, encrypt_with_kek(priv, session.kek), kind="key"
+            )
 
             self._set_public_key(session.username, pub.decode("utf-8"))
             public_key_committed = True
@@ -319,7 +339,9 @@ class FileCryptoService:
                 session.username,
                 e,
             )
-            self._audit_keys_fail(session, "falha ao gravar a chave privada no workspace")
+            self._audit_keys_fail(
+                session, "falha ao gravar a chave privada no workspace"
+            )
             raise FilePermissionError(
                 f"Sem privilégios para criar arquivos no workspace: {e}"
             ) from e
@@ -339,7 +361,9 @@ class FileCryptoService:
 
     def _set_public_key(self, username: str, public_key: str | None) -> None:
         with self._db() as db:
-            db.scalar(select(User).where(User.username == username)).public_key = public_key
+            db.scalar(
+                select(User).where(User.username == username)
+            ).public_key = public_key
             db.commit()
 
     def _audit_keys_fail(self, session: Session, reason: str) -> None:
@@ -375,12 +399,16 @@ class FileCryptoService:
         with self._db() as db:
             user = db.scalar(select(User).where(User.username == target))
             if not user:
-                self._audit_encrypt_fail(session, file_path, target, "usuário alvo inexistente")
+                self._audit_encrypt_fail(
+                    session, file_path, target, "usuário alvo inexistente"
+                )
                 raise UserNotFoundError(
                     f"Usuário alvo '{target}' não existe no sistema."
                 )
             if target != session.username and not user.public_key:
-                self._audit_encrypt_fail(session, file_path, target, "usuário alvo sem chaves geradas")
+                self._audit_encrypt_fail(
+                    session, file_path, target, "usuário alvo sem chaves geradas"
+                )
                 raise InvalidKeyError(
                     f"O usuário '{target}' ainda não gerou chaves no sistema."
                 )
@@ -390,14 +418,18 @@ class FileCryptoService:
         if os.path.islink(absolute_path):
             # Cifraria o destino do link mas removeria só o link: o texto claro
             # continuaria no lugar real, fora do controle do sistema.
-            self._audit_encrypt_fail(session, file_path, target, "origem é um link simbólico")
+            self._audit_encrypt_fail(
+                session, file_path, target, "origem é um link simbólico"
+            )
             raise FilePermissionError(
                 "Links simbólicos não podem ser encriptados; informe o caminho do arquivo real."
             )
         if self._is_protected_file(absolute_path):
             # Cifrar (e portanto apagar) a chave privada ou a chave HMAC da
             # auditoria inutilizaria as chaves do sistema e o log já assinado.
-            self._audit_encrypt_fail(session, file_path, target, "arquivo de chave do sistema")
+            self._audit_encrypt_fail(
+                session, file_path, target, "arquivo de chave do sistema"
+            )
             raise FilePermissionError(
                 "Arquivos de chave do sistema (private.pem e a chave da auditoria) "
                 "não podem ser encriptados."
@@ -409,13 +441,17 @@ class FileCryptoService:
                 pass
         except FileNotFoundError as e:
             logger.error("FILE_NOT_FOUND: Arquivo fonte ausente na encriptação: %s", e)
-            self._audit_encrypt_fail(session, file_path, target, "arquivo fonte ausente")
+            self._audit_encrypt_fail(
+                session, file_path, target, "arquivo fonte ausente"
+            )
             raise CryptoFileNotFoundError(
                 f"Arquivo '{file_path}' não encontrado para encriptação."
             ) from e
         except OSError as e:
             logger.error("ERRO_OS: Falha de permissão ao ler/escrever arquivo: %s", e)
-            self._audit_encrypt_fail(session, file_path, target, "falha de permissão ao ler/escrever")
+            self._audit_encrypt_fail(
+                session, file_path, target, "falha de permissão ao ler/escrever"
+            )
             raise FilePermissionError(f"Sem permissão de acesso ao arquivo: {e}") from e
 
         file_id = str(uuid.uuid4())
@@ -433,7 +469,9 @@ class FileCryptoService:
                 )
         except OSError as e:
             logger.error("ERRO_OS: Falha de permissão ao criar destino: %s", e)
-            self._audit_encrypt_fail(session, file_path, target, "falha de permissão ao ler/escrever")
+            self._audit_encrypt_fail(
+                session, file_path, target, "falha de permissão ao ler/escrever"
+            )
             raise FilePermissionError(f"Sem permissão de acesso ao arquivo: {e}") from e
 
         # Envelope: uma linha de permissão por usuário autorizado. Para o alvo
@@ -475,20 +513,29 @@ class FileCryptoService:
         try:
             # Nunca sobrescreve um .enc existente: isso destruiria o conteúdo
             # cifrado anterior e deixaria os metadados dele órfãos.
-            with open(absolute_path, "rb") as source_file, _new_file(final_out) as enc_file:
+            with (
+                open(absolute_path, "rb") as source_file,
+                _new_file(final_out) as enc_file,
+            ):
                 enc_file.write(file_id.encode("ascii"))
                 original_hash = encrypt_stream(source_file, enc_file, dek)
         except FileExistsError as e:
             logger.error("FILE_EXISTS: Destino cifrado já existe: %s", final_out)
-            self._audit_encrypt_fail(session, file_path, target, "arquivo cifrado de destino já existe")
+            self._audit_encrypt_fail(
+                session, file_path, target, "arquivo cifrado de destino já existe"
+            )
             raise FileAlreadyExistsError(
                 f"Já existe um arquivo cifrado em '{final_out}'. "
                 "Renomeie o arquivo de origem ou informe outro destino com -o."
             ) from e
         except OSError as e:
             logger.error("ERRO_OS: Falha ao gravar o arquivo cifrado: %s", e)
-            self._audit_encrypt_fail(session, file_path, target, "falha de permissão ao ler/escrever")
-            raise FilePermissionError(f"Sem permissão ao gravar o arquivo cifrado: {e}") from e
+            self._audit_encrypt_fail(
+                session, file_path, target, "falha de permissão ao ler/escrever"
+            )
+            raise FilePermissionError(
+                f"Sem permissão ao gravar o arquivo cifrado: {e}"
+            ) from e
 
         try:
             with self._db() as db:
@@ -542,7 +589,10 @@ class FileCryptoService:
         """Chave privada de qualquer workspace ou arquivos de chave/ponta da auditoria."""
         if os.path.basename(absolute_path) == PRIVATE_KEY_NAME:
             return True
-        protected = (getattr(self.audit, "_key_file", None), getattr(self.audit, "_head_file", None))
+        protected = (
+            getattr(self.audit, "_key_file", None),
+            getattr(self.audit, "_head_file", None),
+        )
         return any(
             path and os.path.normcase(absolute_path) == os.path.normcase(abs_path(path))
             for path in protected
@@ -607,14 +657,22 @@ class FileCryptoService:
                 final_out = os.path.join(workspace, access.original_name)
             # Texto claro não validado deixado por uma decifragem interrompida
             # (queda do processo) não fica esquecido em disco.
-            for orphan in _stale_temps(os.path.dirname(final_out), "plain", STALE_PLAINTEXT_SECONDS):
-                logger.warning("ORPHAN_PLAINTEXT: removendo temporário órfão '%s'.", orphan)
+            for orphan in _stale_temps(
+                os.path.dirname(final_out), "plain", STALE_PLAINTEXT_SECONDS
+            ):
+                logger.warning(
+                    "ORPHAN_PLAINTEXT: removendo temporário órfão '%s'.", orphan
+                )
                 _discard(orphan)
             with _new_file(final_out):
                 pass
         except FileExistsError as e:
-            logger.error("FILE_EXISTS: Destino da descriptografia já existe: %s", final_out)
-            self._audit_decrypt_fail(session, encrypted_path, "arquivo de destino já existe")
+            logger.error(
+                "FILE_EXISTS: Destino da descriptografia já existe: %s", final_out
+            )
+            self._audit_decrypt_fail(
+                session, encrypted_path, "arquivo de destino já existe"
+            )
             raise FileAlreadyExistsError(
                 f"Já existe um arquivo em '{final_out}'. "
                 "Mova-o ou informe outro destino com -o."
@@ -624,8 +682,13 @@ class FileCryptoService:
 
         tmp_path = None
         try:
-            with _temp_file(os.path.dirname(final_out), kind="plain") as (tmp_file, tmp_path):
-                self._stream_validated(session, file_id, access, dek, encrypted_path, action, tmp_file)
+            with _temp_file(os.path.dirname(final_out), kind="plain") as (
+                tmp_file,
+                tmp_path,
+            ):
+                self._stream_validated(
+                    session, file_id, access, dek, encrypted_path, action, tmp_file
+                )
             os.replace(tmp_path, final_out)
             tmp_path = None
         except OSError as e:
@@ -665,10 +728,16 @@ class FileCryptoService:
         )
         return final_out
 
-    def _decrypt_write_failed(self, session: Session, encrypted_path: str, error: OSError):
+    def _decrypt_write_failed(
+        self, session: Session, encrypted_path: str, error: OSError
+    ):
         logger.error("ERRO_OS: Falha ao gravar o arquivo descriptografado: %s", error)
-        self._audit_decrypt_fail(session, encrypted_path, "falha de permissão ao gravar o arquivo")
-        raise FilePermissionError(f"Sem permissão ao gravar o arquivo: {error}") from error
+        self._audit_decrypt_fail(
+            session, encrypted_path, "falha de permissão ao gravar o arquivo"
+        )
+        raise FilePermissionError(
+            f"Sem permissão ao gravar o arquivo: {error}"
+        ) from error
 
     def verify_file(self, session: Session, encrypted_path: str) -> VerifyResult:
         """
@@ -700,7 +769,9 @@ class FileCryptoService:
             action,
             "DEK do registro inválida para este usuário",
         )
-        self._stream_validated(session, file_id, access, dek, encrypted_path, action, None)
+        self._stream_validated(
+            session, file_id, access, dek, encrypted_path, action, None
+        )
 
         logger.info(
             "FILE_VERIFIED: '%s' íntegro na verificação de '%s'.",
@@ -721,7 +792,9 @@ class FileCryptoService:
             sha256_hash=access.sha256_hash,
         )
 
-    def update_file(self, session: Session, encrypted_path: str, content_path: str) -> str:
+    def update_file(
+        self, session: Session, encrypted_path: str, content_path: str
+    ) -> str:
         """
         Substitui o conteúdo de um arquivo .enc existente (04.1).
 
@@ -738,7 +811,9 @@ class FileCryptoService:
         action = AuditAction.FILE_MODIFY
         self.sessions.validate(session)
         file_id = self._read_file_id(session, encrypted_path, action)
-        access = self._load_access(session, file_id, encrypted_path, action, require_modify=True)
+        access = self._load_access(
+            session, file_id, encrypted_path, action, require_modify=True
+        )
         dek = self._unwrapped_dek(
             session,
             access.wrapped_dek,
@@ -753,9 +828,14 @@ class FileCryptoService:
             with open(content_abs, "rb"):
                 pass
         except OSError as e:
-            logger.error("FILE_NOT_FOUND: Arquivo de conteúdo ausente na modificação: %s", e)
+            logger.error(
+                "FILE_NOT_FOUND: Arquivo de conteúdo ausente na modificação: %s", e
+            )
             self._audit_fail(
-                session, action, encrypted_path, "arquivo de conteúdo ausente ou ilegível"
+                session,
+                action,
+                encrypted_path,
+                "arquivo de conteúdo ausente ou ilegível",
             )
             raise CryptoFileNotFoundError(
                 f"Arquivo de conteúdo '{content_path}' ausente ou ilegível."
@@ -765,7 +845,9 @@ class FileCryptoService:
         # precisa conseguir ler o arquivo, e a adulteração existente é
         # detectada e reportada, não sobreposta (04.3).
         try:
-            self._stream_validated(session, file_id, access, dek, encrypted_path, action, None)
+            self._stream_validated(
+                session, file_id, access, dek, encrypted_path, action, None
+            )
         except _ConcurrentChange:
             raise self._conflict(session, encrypted_path, action) from None
 
@@ -779,8 +861,12 @@ class FileCryptoService:
                 new_hash = encrypt_stream(source_file, tmp_file, dek)
         except OSError as e:
             logger.error("ERRO_OS: Falha ao gravar o arquivo cifrado modificado: %s", e)
-            self._audit_fail(session, action, encrypted_path, "falha ao gravar o arquivo cifrado")
-            raise FilePermissionError(f"Sem permissão ao gravar o arquivo cifrado: {e}") from e
+            self._audit_fail(
+                session, action, encrypted_path, "falha ao gravar o arquivo cifrado"
+            )
+            raise FilePermissionError(
+                f"Sem permissão ao gravar o arquivo cifrado: {e}"
+            ) from e
 
         # Substituição atômica e com controle de concorrência: o novo hash é
         # gravado com compare-and-swap da versão e só então o temporário
@@ -794,9 +880,18 @@ class FileCryptoService:
             except OSError as e:
                 if not _installed_by_recovery(tmp_path, e):
                     # O .enc antigo segue no lugar: o hash volta a corresponder a ele.
-                    self._bump_version(file_id, access.version + 1, sha256_hash=access.sha256_hash)
-                    logger.error("ERRO_OS: Falha ao substituir o arquivo cifrado: %s", e)
-                    self._audit_fail(session, action, encrypted_path, "falha ao gravar o arquivo cifrado")
+                    self._bump_version(
+                        file_id, access.version + 1, sha256_hash=access.sha256_hash
+                    )
+                    logger.error(
+                        "ERRO_OS: Falha ao substituir o arquivo cifrado: %s", e
+                    )
+                    self._audit_fail(
+                        session,
+                        action,
+                        encrypted_path,
+                        "falha ao gravar o arquivo cifrado",
+                    )
                     raise FilePermissionError(
                         f"Não foi possível substituir o arquivo cifrado (está em uso?): {e}"
                     ) from e
@@ -836,8 +931,10 @@ class FileCryptoService:
         devem repetir a leitura, em vez de acusar adulteração."""
         try:
             self._bump_version(file_id, expected_version)
-        except Exception as e:  # o arquivo e os metadados já estão coerentes
-            logger.warning("VERSION_FINALIZE: falha ao finalizar a versão de '%s': %s", file_id, e)
+        except Exception as e:  # o arquivo e os metadados já estão coerentes  # noqa: BLE001
+            logger.warning(
+                "VERSION_FINALIZE: falha ao finalizar a versão de '%s': %s", file_id, e
+            )
 
     def _file_version(self, file_id: str) -> int | None:
         with self._db() as db:
@@ -895,25 +992,35 @@ class FileCryptoService:
                 header = enc_file.read(ENC_HEADER_SIZE)
         except FileNotFoundError as e:
             logger.error("FILE_NOT_FOUND: Arquivo encriptado ausente: %s", e)
-            self._audit_fail(session, action, encrypted_path, "arquivo .enc inexistente")
+            self._audit_fail(
+                session, action, encrypted_path, "arquivo .enc inexistente"
+            )
             raise CryptoFileNotFoundError(
                 f"Arquivo encriptado '{encrypted_path}' não encontrado."
             ) from e
         except OSError as e:
             logger.error("ERRO_OS: Falha de permissão ao ler arquivo encriptado: %s", e)
-            self._audit_fail(session, action, encrypted_path, "falha de permissão ao ler arquivo")
+            self._audit_fail(
+                session, action, encrypted_path, "falha de permissão ao ler arquivo"
+            )
             raise FilePermissionError(
                 f"Sem permissão para ler o arquivo encriptado: {e}"
             ) from e
 
         if len(header) < ENC_HEADER_SIZE:
-            self._audit_fail(session, action, encrypted_path, "arquivo .enc truncado ou inválido")
-            raise InvalidKeyError("O arquivo .enc está truncado ou tem formato inválido.")
+            self._audit_fail(
+                session, action, encrypted_path, "arquivo .enc truncado ou inválido"
+            )
+            raise InvalidKeyError(
+                "O arquivo .enc está truncado ou tem formato inválido."
+            )
 
         try:
             return str(uuid.UUID(header[:FILE_ID_SIZE].decode("ascii")))
         except (ValueError, UnicodeDecodeError) as e:
-            self._audit_fail(session, action, encrypted_path, "formato .enc não reconhecido")
+            self._audit_fail(
+                session, action, encrypted_path, "formato .enc não reconhecido"
+            )
             raise InvalidKeyError(
                 "Formato de arquivo .enc não reconhecido (cifrado por uma versão anterior do sistema)."
             ) from e
@@ -930,8 +1037,12 @@ class FileCryptoService:
         with self._db() as db:
             file_row = db.get(File, file_id)
             if file_row is None:
-                self._audit_fail(session, action, encrypted_path, "arquivo sem metadados registrados")
-                raise IntegrityError("O arquivo não possui metadados de integridade no sistema.")
+                self._audit_fail(
+                    session, action, encrypted_path, "arquivo sem metadados registrados"
+                )
+                raise IntegrityError(
+                    "O arquivo não possui metadados de integridade no sistema."
+                )
 
             permission = db.scalar(
                 select(FilePermission).where(
@@ -940,11 +1051,21 @@ class FileCryptoService:
                 )
             )
             if permission is None:
-                self._audit_fail(session, action, encrypted_path, "usuário sem permissão sobre o arquivo")
-                raise FilePermissionError("Você não tem permissão de acesso a este arquivo.")
+                self._audit_fail(
+                    session,
+                    action,
+                    encrypted_path,
+                    "usuário sem permissão sobre o arquivo",
+                )
+                raise FilePermissionError(
+                    "Você não tem permissão de acesso a este arquivo."
+                )
             if require_modify and permission.permission != Permission.MODIFY.value:
                 self._audit_fail(
-                    session, action, encrypted_path, "usuário sem permissão de modificação sobre o arquivo"
+                    session,
+                    action,
+                    encrypted_path,
+                    "usuário sem permissão de modificação sobre o arquivo",
                 )
                 raise FilePermissionError(
                     "Usuários com permissão de leitura não podem modificar este arquivo."
@@ -982,8 +1103,12 @@ class FileCryptoService:
                     failed = None
         except OSError as e:
             logger.error("ERRO_OS: Falha ao processar o arquivo encriptado: %s", e)
-            self._audit_fail(session, action, encrypted_path, "falha de permissão ao ler arquivo")
-            raise FilePermissionError(f"Falha ao processar o arquivo encriptado: {e}") from e
+            self._audit_fail(
+                session, action, encrypted_path, "falha de permissão ao ler arquivo"
+            )
+            raise FilePermissionError(
+                f"Falha ao processar o arquivo encriptado: {e}"
+            ) from e
 
         if failed is None and digest != access.sha256_hash:
             failed = "hash SHA-256 do conteúdo diverge do hash original registrado"
@@ -1042,7 +1167,9 @@ class FileCryptoService:
         um arquivo apenas adulterado nunca passa nessa validação.
         """
         enc_abs = abs_path(encrypted_path)
-        for candidate in _stale_temps(os.path.dirname(enc_abs), "enc", RECOVERY_MIN_AGE_SECONDS):
+        for candidate in _stale_temps(
+            os.path.dirname(enc_abs), "enc", RECOVERY_MIN_AGE_SECONDS
+        ):
             try:
                 with open(candidate, "rb") as tmp_file:
                     if tmp_file.read(FILE_ID_SIZE) != file_id.encode("ascii"):
@@ -1052,7 +1179,9 @@ class FileCryptoService:
                 os.replace(candidate, enc_abs)
             except (OSError, ValueError):
                 continue
-            self._record_recovery(session, encrypted_path, candidate, "gravação do arquivo cifrado")
+            self._record_recovery(
+                session, encrypted_path, candidate, "gravação do arquivo cifrado"
+            )
             return True
         return False
 
@@ -1079,7 +1208,9 @@ class FileCryptoService:
                 os.replace(candidate, os.path.join(workspace, PRIVATE_KEY_NAME))
             except (OSError, ValueError):
                 continue
-            self._record_recovery(session, encrypted_path, candidate, "troca do par de chaves")
+            self._record_recovery(
+                session, encrypted_path, candidate, "troca do par de chaves"
+            )
             return True
         return False
 
@@ -1118,7 +1249,9 @@ class FileCryptoService:
     def _conflict(
         self, session: Session, encrypted_path: str, action: AuditAction
     ) -> ConcurrentModificationError:
-        self._audit_fail(session, action, encrypted_path, "alteração simultânea do arquivo")
+        self._audit_fail(
+            session, action, encrypted_path, "alteração simultânea do arquivo"
+        )
         return ConcurrentModificationError(
             "O arquivo foi alterado por outra operação ao mesmo tempo. "
             "Nada foi gravado; tente novamente."
@@ -1145,7 +1278,9 @@ class FileCryptoService:
             # A DEK via RSA não abre com a chave privada do disco: pode ser um
             # `genkeys --force` interrompido; recuperado, tenta de novo (uma vez,
             # pois o temporário deixa de existir).
-            if wrap_alg == WrapAlg.RSA.value and self._recover_private_key(session, encrypted_path):
+            if wrap_alg == WrapAlg.RSA.value and self._recover_private_key(
+                session, encrypted_path
+            ):
                 return self._unwrapped_dek(
                     session, wrapped_dek, wrap_alg, encrypted_path, action, fail_reason
                 )
@@ -1170,7 +1305,9 @@ class FileCryptoService:
         priv_path = os.path.join(workspace, PRIVATE_KEY_NAME)
 
         if not os.path.exists(priv_path):
-            self._audit_fail(session, action, encrypted_path, "chave privada ausente no workspace")
+            self._audit_fail(
+                session, action, encrypted_path, "chave privada ausente no workspace"
+            )
             raise CryptoFileNotFoundError(
                 f"Chave privada não encontrada em '{priv_path}'. Execute 'genkeys' primeiro."
             )
@@ -1186,7 +1323,10 @@ class FileCryptoService:
                 session.username,
             )
             self._audit_fail(
-                session, action, encrypted_path, "chave privada corrompida ou adulterada"
+                session,
+                action,
+                encrypted_path,
+                "chave privada corrompida ou adulterada",
             )
             raise IntegrityError(
                 "Sua chave privada está corrompida ou foi adulterada. Gere as chaves novamente."
@@ -1261,18 +1401,34 @@ class FileCryptoService:
 
         if target_username == session.username:
             self._audit_share_fail(
-                session, encrypted_path, target_username, "o titular já possui acesso ao arquivo"
+                session,
+                encrypted_path,
+                target_username,
+                "o titular já possui acesso ao arquivo",
             )
             raise FilePermissionError("O titular do arquivo já tem acesso a ele.")
 
         with self._db() as db:
-            target_user = db.scalar(select(User).where(User.username == target_username))
+            target_user = db.scalar(
+                select(User).where(User.username == target_username)
+            )
         if target_user is None:
-            self._audit_share_fail(session, encrypted_path, target_username, "usuário alvo inexistente")
-            raise UserNotFoundError(f"Usuário alvo '{target_username}' não existe no sistema.")
+            self._audit_share_fail(
+                session, encrypted_path, target_username, "usuário alvo inexistente"
+            )
+            raise UserNotFoundError(
+                f"Usuário alvo '{target_username}' não existe no sistema."
+            )
         if not target_user.public_key:
-            self._audit_share_fail(session, encrypted_path, target_username, "usuário alvo sem chaves geradas")
-            raise InvalidKeyError(f"O usuário '{target_username}' ainda não gerou chaves no sistema.")
+            self._audit_share_fail(
+                session,
+                encrypted_path,
+                target_username,
+                "usuário alvo sem chaves geradas",
+            )
+            raise InvalidKeyError(
+                f"O usuário '{target_username}' ainda não gerou chaves no sistema."
+            )
 
         file_id = self._read_file_id(session, encrypted_path, action)
 
@@ -1280,9 +1436,14 @@ class FileCryptoService:
             file_row = db.get(File, file_id)
             if file_row is None:
                 self._audit_share_fail(
-                    session, encrypted_path, target_username, "arquivo sem metadados registrados"
+                    session,
+                    encrypted_path,
+                    target_username,
+                    "arquivo sem metadados registrados",
                 )
-                raise IntegrityError("O arquivo não possui metadados de integridade no sistema.")
+                raise IntegrityError(
+                    "O arquivo não possui metadados de integridade no sistema."
+                )
 
             granter = db.scalar(
                 select(FilePermission).where(
@@ -1318,9 +1479,14 @@ class FileCryptoService:
                 dek, target_user.public_key.encode("utf-8")
             )
         except ValueError as e:
-            logger.error("INVALID_KEY: Chave pública de '%s' inválida.", target_username)
+            logger.error(
+                "INVALID_KEY: Chave pública de '%s' inválida.", target_username
+            )
             self._audit_share_fail(
-                session, encrypted_path, target_username, "chave pública do alvo inválida"
+                session,
+                encrypted_path,
+                target_username,
+                "chave pública do alvo inválida",
             )
             raise InvalidKeyError(
                 f"A chave pública de '{target_username}' é inválida ou está corrompida."
@@ -1374,7 +1540,9 @@ class FileCryptoService:
         )
         return encrypted_path
 
-    def revoke_share(self, session: Session, encrypted_path: str, target_username: str) -> str:
+    def revoke_share(
+        self, session: Session, encrypted_path: str, target_username: str
+    ) -> str:
         """
         Revoga o acesso de outro usuário a um arquivo .enc (04.2). Apenas o dono.
 
@@ -1393,14 +1561,24 @@ class FileCryptoService:
             file_row = db.get(File, file_id)
             if file_row is None:
                 self._audit_revoke_fail(
-                    session, encrypted_path, target_username, "arquivo sem metadados registrados"
+                    session,
+                    encrypted_path,
+                    target_username,
+                    "arquivo sem metadados registrados",
                 )
-                raise IntegrityError("O arquivo não possui metadados de integridade no sistema.")
+                raise IntegrityError(
+                    "O arquivo não possui metadados de integridade no sistema."
+                )
             if file_row.owner_id != session.user_id:
                 self._audit_revoke_fail(
-                    session, encrypted_path, target_username, "revogação restrita ao dono do arquivo"
+                    session,
+                    encrypted_path,
+                    target_username,
+                    "revogação restrita ao dono do arquivo",
                 )
-                raise FilePermissionError("Somente o dono do arquivo pode revogar acessos.")
+                raise FilePermissionError(
+                    "Somente o dono do arquivo pode revogar acessos."
+                )
 
             target_user = db.scalar(
                 select(User).where(User.username == target_username)
@@ -1409,12 +1587,19 @@ class FileCryptoService:
                 self._audit_revoke_fail(
                     session, encrypted_path, target_username, "usuário alvo inexistente"
                 )
-                raise UserNotFoundError(f"Usuário '{target_username}' não existe no sistema.")
+                raise UserNotFoundError(
+                    f"Usuário '{target_username}' não existe no sistema."
+                )
             if target_user.user_id == file_row.owner_id:
                 self._audit_revoke_fail(
-                    session, encrypted_path, target_username, "o dono não pode revogar o próprio acesso"
+                    session,
+                    encrypted_path,
+                    target_username,
+                    "o dono não pode revogar o próprio acesso",
                 )
-                raise FilePermissionError("O dono do arquivo não pode revogar o próprio acesso.")
+                raise FilePermissionError(
+                    "O dono do arquivo não pode revogar o próprio acesso."
+                )
 
             grants = db.execute(
                 select(FilePermission, User)
@@ -1423,7 +1608,10 @@ class FileCryptoService:
             ).all()
             if not any(grant.user_id == target_user.user_id for grant, _ in grants):
                 self._audit_revoke_fail(
-                    session, encrypted_path, target_username, "usuário sem acesso concedido ao arquivo"
+                    session,
+                    encrypted_path,
+                    target_username,
+                    "usuário sem acesso concedido ao arquivo",
                 )
                 raise FilePermissionError(
                     f"O usuário '{target_username}' não possui acesso a este arquivo."
@@ -1434,12 +1622,19 @@ class FileCryptoService:
             # Cópia das concessões para desfazer a revogação se a troca do
             # arquivo falhar depois do commit.
             snapshot = [_grant_snapshot(grant) for grant, _ in grants]
-            own = next((grant for grant, _ in grants if grant.user_id == session.user_id), None)
+            own = next(
+                (grant for grant, _ in grants if grant.user_id == session.user_id), None
+            )
             if own is None:
                 self._audit_revoke_fail(
-                    session, encrypted_path, target_username, "dono sem concessão registrada"
+                    session,
+                    encrypted_path,
+                    target_username,
+                    "dono sem concessão registrada",
                 )
-                raise FilePermissionError("O dono não tem concessão registrada para este arquivo.")
+                raise FilePermissionError(
+                    "O dono não tem concessão registrada para este arquivo."
+                )
             own_wrap_alg, own_wrapped_dek = own.wrap_alg, own.wrapped_dek
             remaining = [
                 (grant.user_id, user.username, user.public_key)
@@ -1448,10 +1643,17 @@ class FileCryptoService:
             ]
 
         old_dek = self._unwrapped_dek(
-            session, own_wrapped_dek, own_wrap_alg, encrypted_path, action, "chave do dono não confere"
+            session,
+            own_wrapped_dek,
+            own_wrap_alg,
+            encrypted_path,
+            action,
+            "chave do dono não confere",
         )
         new_dek = generate_dek()
-        rewrapped = self._rewrap_for(session, new_dek, remaining, encrypted_path, target_username)
+        rewrapped = self._rewrap_for(
+            session, new_dek, remaining, encrypted_path, target_username
+        )
 
         enc_abs = abs_path(encrypted_path)
         failed = None
@@ -1476,9 +1678,14 @@ class FileCryptoService:
         except OSError as e:
             logger.error("ERRO_OS: Falha ao re-cifrar o arquivo na revogação: %s", e)
             self._audit_revoke_fail(
-                session, encrypted_path, target_username, "falha ao gravar o arquivo cifrado"
+                session,
+                encrypted_path,
+                target_username,
+                "falha ao gravar o arquivo cifrado",
             )
-            raise FilePermissionError(f"Sem permissão ao gravar o arquivo cifrado: {e}") from e
+            raise FilePermissionError(
+                f"Sem permissão ao gravar o arquivo cifrado: {e}"
+            ) from e
 
         if failed is not None:
             # Fora dos `with`: com o .enc fechado a recuperação consegue trocá-lo
@@ -1487,7 +1694,12 @@ class FileCryptoService:
             # repetida em seguida.
             try:
                 self._on_integrity_failure(
-                    session, file_id, version, encrypted_path, action, failed,
+                    session,
+                    file_id,
+                    version,
+                    encrypted_path,
+                    action,
+                    failed,
                     recover=lambda: self._recover_interrupted_write(
                         session, file_id, sha256_hash, old_dek, encrypted_path
                     ),
@@ -1514,7 +1726,10 @@ class FileCryptoService:
                 for user_id, wrap_alg, wrapped_dek in rewrapped:
                     db.execute(
                         update(FilePermission)
-                        .where(FilePermission.file_id == file_id, FilePermission.user_id == user_id)
+                        .where(
+                            FilePermission.file_id == file_id,
+                            FilePermission.user_id == user_id,
+                        )
                         .values(wrap_alg=wrap_alg, wrapped_dek=wrapped_dek)
                     )
                 db.commit()
@@ -1524,9 +1739,14 @@ class FileCryptoService:
                 if not _installed_by_recovery(tmp_path, e):
                     # O .enc antigo (DEK antiga) segue no lugar: desfaz a revogação.
                     self._restore_grants(file_id, snapshot)
-                    logger.error("ERRO_OS: Falha ao substituir o arquivo cifrado: %s", e)
+                    logger.error(
+                        "ERRO_OS: Falha ao substituir o arquivo cifrado: %s", e
+                    )
                     self._audit_revoke_fail(
-                        session, encrypted_path, target_username, "falha ao gravar o arquivo cifrado"
+                        session,
+                        encrypted_path,
+                        target_username,
+                        "falha ao gravar o arquivo cifrado",
                     )
                     raise FilePermissionError(
                         f"Não foi possível substituir o arquivo cifrado (está em uso?): {e}. "
@@ -1563,7 +1783,9 @@ class FileCryptoService:
         rewrapped = []
         for user_id, username, public_key in remaining:
             if user_id == session.user_id:
-                rewrapped.append((user_id, WrapAlg.KEK.value, encrypt_with_kek(new_dek, session.kek)))
+                rewrapped.append(
+                    (user_id, WrapAlg.KEK.value, encrypt_with_kek(new_dek, session.kek))
+                )
                 continue
             # A KEK dos demais é desconhecida: a DEK nova vai pela chave pública.
             try:
@@ -1590,7 +1812,9 @@ class FileCryptoService:
             db.execute(delete(FilePermission).where(FilePermission.file_id == file_id))
             db.add_all(FilePermission(**grant) for grant in snapshot)
             db.execute(
-                update(File).where(File.file_id == file_id).values(version=File.version + 1)
+                update(File)
+                .where(File.file_id == file_id)
+                .values(version=File.version + 1)
             )
             db.commit()
 

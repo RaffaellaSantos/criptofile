@@ -24,13 +24,13 @@ import hmac
 import json
 import logging
 import os
+import socket
 import tempfile
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from secrets import token_hex
 
-import socket
 from sqlalchemy import exists, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DBSession
@@ -97,7 +97,9 @@ class AuditService:
         except FileExistsError:
             # Outro processo criou o arquivo entre o exists() e o open().
             return self._read_key_file()
-        logger.info("AUDIT_KEY: nova chave de assinatura criada em '%s'.", self._key_file)
+        logger.info(
+            "AUDIT_KEY: nova chave de assinatura criada em '%s'.", self._key_file
+        )
         return bytes.fromhex(hex_key)
 
     def _read_key_file(self) -> bytes:
@@ -168,15 +170,22 @@ class AuditService:
             self._write_head(signature)
             break
         else:
-            raise AuditError("Não foi possível encadear o evento de auditoria (concorrência).")
+            raise AuditError(
+                "Não foi possível encadear o evento de auditoria (concorrência)."
+            )
 
         logger.debug(
             "AUDIT: %s (%s) user=%s resource=%s",
-            action_type, status, username, resource_id,
+            action_type,
+            status,
+            username,
+            resource_id,
         )
 
     def _head_mac(self, signature: str) -> str:
-        return hmac.new(self._hmac_key, f"head|{signature}".encode(), "sha256").hexdigest()
+        return hmac.new(
+            self._hmac_key, f"head|{signature}".encode(), "sha256"
+        ).hexdigest()
 
     def _write_head(self, signature: str) -> None:
         """Registra a ponta atual da cadeia (troca atômica do arquivo).
@@ -202,7 +211,9 @@ class AuditService:
             os.replace(tmp_path, self._head_file)
             tmp_path = None
         except OSError as e:
-            logger.warning("AUDIT_HEAD: não foi possível registrar a ponta do log: %s", e)
+            logger.warning(
+                "AUDIT_HEAD: não foi possível registrar a ponta do log: %s", e
+            )
         finally:
             if tmp_path is not None:
                 with contextlib.suppress(OSError):
@@ -213,9 +224,14 @@ class AuditService:
         if not hmac.compare_digest(mac, self._head_mac(signature)):
             return False
         with self._db() as db:
-            return db.scalar(
-                select(AuditLog.event_id).where(AuditLog.signature_hmac == signature)
-            ) is not None
+            return (
+                db.scalar(
+                    select(AuditLog.event_id).where(
+                        AuditLog.signature_hmac == signature
+                    )
+                )
+                is not None
+            )
 
     def _read_head(self) -> tuple[str, str] | None:
         """(assinatura, mac) da ponta registrada; None se nunca foi registrada."""
@@ -250,7 +266,9 @@ class AuditService:
         return json.dumps(details, ensure_ascii=False, sort_keys=True)
 
     def _sign(self, event: AuditLog) -> str:
-        return hmac.new(self._hmac_key, self._canonical(event).encode(), "sha256").hexdigest()
+        return hmac.new(
+            self._hmac_key, self._canonical(event).encode(), "sha256"
+        ).hexdigest()
 
     @staticmethod
     def _canonical(event: AuditLog) -> str:
@@ -325,22 +343,30 @@ class AuditService:
             if not hmac.compare_digest(self._sign(event), event.signature_hmac):
                 logger.error(
                     "AUDIT_TAMPER: evento '%s' (%s) foi adulterado.",
-                    event.event_id, event.action_type,
+                    event.event_id,
+                    event.action_type,
                 )
                 forged.append(event.event_id)
-            elif event.prev_hmac not in (None, AUDIT_GENESIS) and event.prev_hmac not in signatures:
+            elif (
+                event.prev_hmac not in (None, AUDIT_GENESIS)
+                and event.prev_hmac not in signatures
+            ):
                 # O elo aponta para um evento que não existe mais: o registro
                 # imediatamente anterior a este foi apagado do log.
                 logger.error(
                     "AUDIT_GAP: o evento anterior a '%s' (%s) foi removido do log.",
-                    event.event_id, event.action_type,
+                    event.event_id,
+                    event.action_type,
                 )
                 forged.append(event.event_id)
 
         registered = self._read_head()
         if registered is not None:
             signature, mac = registered
-            if not hmac.compare_digest(mac, self._head_mac(signature)) or signature not in signatures:
+            if (
+                not hmac.compare_digest(mac, self._head_mac(signature))
+                or signature not in signatures
+            ):
                 logger.error(
                     "AUDIT_TRUNCATED: a ponta registrada do log não existe mais no banco: "
                     "os eventos mais recentes foram removidos (ou o registro da ponta foi adulterado)."
@@ -399,7 +425,10 @@ class AuditService:
         return "\n".join(self._cef_line(event) for event in events)
 
     def _cef_line(self, event: AuditLog) -> str:
-        if event.action_type in (AuditAction.SECURITY_ALERT, AuditAction.INTEGRITY_VIOLATION):
+        if event.action_type in (
+            AuditAction.SECURITY_ALERT,
+            AuditAction.INTEGRITY_VIOLATION,
+        ):
             severity = self.CEF_SEVERITY_ALERT
         elif event.status == AuditStatus.FAIL:
             severity = self.CEF_SEVERITY_FAIL

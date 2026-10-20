@@ -38,7 +38,9 @@ def test_color_formatter_does_not_mutate_record():
 
 
 def test_json_formatter_produces_valid_json_with_escaped_input():
-    out = JSONFormatter().format(_record("arquivo '%s'", "a\"b\nc\x1b", level=logging.ERROR))
+    out = JSONFormatter().format(
+        _record("arquivo '%s'", 'a"b\nc\x1b', level=logging.ERROR)
+    )
     data = json.loads(out)
     assert data["level"] == "ERROR"
     assert data["message"] == "arquivo 'a\"b\nc\x1b'"
@@ -51,7 +53,9 @@ def test_json_formatter_includes_exception():
     except ValueError:
         import sys
 
-        out = JSONFormatter().format(_record("erro", level=logging.ERROR, exc_info=sys.exc_info()))
+        out = JSONFormatter().format(
+            _record("erro", level=logging.ERROR, exc_info=sys.exc_info())
+        )
     assert "ValueError: falhou" in json.loads(out)["exc_info"]
 
 

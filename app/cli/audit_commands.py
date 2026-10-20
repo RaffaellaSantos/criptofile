@@ -133,14 +133,43 @@ def register_audit_commands(subparsers) -> None:
         "audit-report",
         help="Exibe o relatório completo de logs do sistema (apenas ADMIN).",
     )
-    p.add_argument("--as", dest="as_user", type=validate_str, required=True, metavar="ADMIN",
-                   help="Username do ADMIN que executa a operação.")
-    p.add_argument("-u", "--user", type=validate_str, default=None, metavar="USER",
-                   help="Filtrar o relatório por usuário.")
-    p.add_argument("-a", "--action", type=_action, default=None, metavar="{LOGIN,FILE_ENCRYPT,...}",
-                   help="Filtrar o relatório por tipo de ação.")
-    p.add_argument("--export", choices=("json", "cef"), default=None, metavar="{json,cef}",
-                   help="Exportar o relatório no formato indicado em vez de exibir a tabela.")
-    p.add_argument("-o", "--output", type=validate_str, default=None, metavar="FILE",
-                   help="Gravar a exportação no arquivo indicado (requer --export).")
+    p.add_argument(
+        "--as",
+        dest="as_user",
+        type=validate_str,
+        required=True,
+        metavar="ADMIN",
+        help="Username do ADMIN que executa a operação.",
+    )
+    p.add_argument(
+        "-u",
+        "--user",
+        type=validate_str,
+        default=None,
+        metavar="USER",
+        help="Filtrar o relatório por usuário.",
+    )
+    p.add_argument(
+        "-a",
+        "--action",
+        type=_action,
+        default=None,
+        metavar="{LOGIN,FILE_ENCRYPT,...}",
+        help="Filtrar o relatório por tipo de ação.",
+    )
+    p.add_argument(
+        "--export",
+        choices=("json", "cef"),
+        default=None,
+        metavar="{json,cef}",
+        help="Exportar o relatório no formato indicado em vez de exibir a tabela.",
+    )
+    p.add_argument(
+        "-o",
+        "--output",
+        type=validate_str,
+        default=None,
+        metavar="FILE",
+        help="Gravar a exportação no arquivo indicado (requer --export).",
+    )
     p.set_defaults(func=cmd_audit_report)

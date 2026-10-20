@@ -9,10 +9,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 class Settings(BaseSettings):
     """Configurações do Sistema"""
 
-    POSTGRES_USER: str | None= "ps_user"
-    POSTGRES_PASSWORD: str | None= "strong!password"
-    POSTGRES_DB: str | None= "ps_db"
-    POSTGRES_PORT: int | None= 5432
+    POSTGRES_USER: str | None = "ps_user"
+    POSTGRES_PASSWORD: str | None = "strong!password"
+    POSTGRES_DB: str | None = "ps_db"
+    POSTGRES_PORT: int | None = 5432
     # Sem padrão obrigatório: a ausência é reportada com mensagem clara por
     # `get_engine()` em vez de quebrar a importação da aplicação.
     DATABASE_URL: str | None = None
@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     CRIPTOFILE_HOME: str | None = None
     # .env da raiz do projeto, independentemente da pasta atual.
     model_config = SettingsConfigDict(env_file=PROJECT_ROOT / ".env")
+
 
 settings = Settings()
 

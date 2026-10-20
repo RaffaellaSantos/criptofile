@@ -10,9 +10,9 @@ from sqlalchemy.pool import StaticPool
 
 from app.core import security
 from app.core.database import Base
-from app.model.audit_log_model import AuditAction, AuditLog, AuditStatus
 from app.exceptions.audit_exceptions import AuditError
 from app.exceptions.iam_exceptions import AuthenticationError
+from app.model.audit_log_model import AuditAction, AuditLog, AuditStatus
 from app.service import AuditService, IAMService
 from app.service.audit_service import AUDIT_GENESIS, AUDIT_TRUNCATED
 
@@ -32,7 +32,9 @@ def factory():
 
 @pytest.fixture
 def audit(factory, tmp_path):
-    return AuditService(factory, hmac_key=TEST_HMAC_KEY, key_file=str(tmp_path / ".audit_key"))
+    return AuditService(
+        factory, hmac_key=TEST_HMAC_KEY, key_file=str(tmp_path / ".audit_key")
+    )
 
 
 @pytest.fixture
@@ -140,7 +142,9 @@ def test_foreign_key_fails_verification(audit, factory, tmp_path):
     audit.record(AuditAction.USER_CREATE, username="bob")
     # Mesmo registro visto por outro serviço com chave diferente: a assinatura
     # não confere, provando que a chave realmente participa do HMAC.
-    other = AuditService(factory, hmac_key=bytes(32), key_file=str(tmp_path / ".audit_key2"))
+    other = AuditService(
+        factory, hmac_key=bytes(32), key_file=str(tmp_path / ".audit_key2")
+    )
     assert other.verify_integrity() != []
 
 
@@ -166,7 +170,9 @@ def test_key_file_is_created_and_reused(factory, monkeypatch, tmp_path):
     assert second.verify_integrity() == []
 
 
-@pytest.mark.parametrize("content", ["nao-e-hex", "abcd"], ids=["hex-invalido", "tamanho-errado"])
+@pytest.mark.parametrize(
+    "content", ["nao-e-hex", "abcd"], ids=["hex-invalido", "tamanho-errado"]
+)
 def test_corrupted_key_file_raises_audit_error(factory, monkeypatch, tmp_path, content):
     from app.core.config import settings
 
@@ -202,7 +208,11 @@ def test_events_form_a_signed_chain(audit, factory):
 def test_chain_follows_insertion_not_timestamp(audit, factory):
     """Eventos com timestamp retroativo (ex.: testes de janela) seguem encadeados."""
     audit.record(AuditAction.LOGIN, username="a")
-    audit.record(AuditAction.LOGIN, username="b", timestamp=datetime.now(UTC) - timedelta(hours=1))
+    audit.record(
+        AuditAction.LOGIN,
+        username="b",
+        timestamp=datetime.now(UTC) - timedelta(hours=1),
+    )
     assert [e.username for e in _chain(factory)] == ["a", "b"]
     assert audit.verify_integrity() == []
 
@@ -289,7 +299,9 @@ def test_missing_head_file_is_not_an_alarm(audit, factory, tmp_path):
 
 def test_head_write_failure_does_not_lose_event(factory, tmp_path, caplog):
     audit = AuditService(
-        factory, hmac_key=TEST_HMAC_KEY, key_file=str(tmp_path / ".audit_key"),
+        factory,
+        hmac_key=TEST_HMAC_KEY,
+        key_file=str(tmp_path / ".audit_key"),
         head_file=str(tmp_path / "pasta-inexistente" / "head"),
     )
     audit.record(AuditAction.LOGIN, username="a")
@@ -339,7 +351,9 @@ def test_concurrent_append_retries_on_new_head(audit, factory, monkeypatch):
     stale = iter([AUDIT_GENESIS])  # primeira tentativa usa uma ponta já ocupada
 
     monkeypatch.setattr(
-        AuditService, "_chain_head", staticmethod(lambda db: next(stale, None) or real_head(db))
+        AuditService,
+        "_chain_head",
+        staticmethod(lambda db: next(stale, None) or real_head(db)),
     )
     audit.record(AuditAction.LOGIN, username="b")
 
@@ -349,6 +363,8 @@ def test_concurrent_append_retries_on_new_head(audit, factory, monkeypatch):
 
 def test_append_gives_up_after_repeated_conflicts(audit, factory, monkeypatch):
     audit.record(AuditAction.LOGIN, username="a")
-    monkeypatch.setattr(AuditService, "_chain_head", staticmethod(lambda db: AUDIT_GENESIS))
+    monkeypatch.setattr(
+        AuditService, "_chain_head", staticmethod(lambda db: AUDIT_GENESIS)
+    )
     with pytest.raises(AuditError, match="encadear"):
         audit.record(AuditAction.LOGIN, username="b")

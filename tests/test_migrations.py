@@ -88,7 +88,9 @@ def test_migrations_roundtrip_on_postgresql(monkeypatch):
         migrated = _columns(POSTGRES_TEST_URL)
         assert set(migrated) == TABLES
         for table in TABLES:
-            assert migrated[table] == {c.name for c in Base.metadata.tables[table].columns}
+            assert migrated[table] == {
+                c.name for c in Base.metadata.tables[table].columns
+            }
     finally:
         command.downgrade(config, "base")
     assert _columns(POSTGRES_TEST_URL) == {}

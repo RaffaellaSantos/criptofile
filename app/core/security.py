@@ -89,7 +89,5 @@ def validate_password(password: str, username: str) -> None:
         )
     if password.lower() == username.lower():
         raise CredentialValidationError("A senha não pode ser igual ao username.")
-    if not (
-        any(c.isalpha() for c in password) and any(c.isdigit() for c in password)
-    ):
+    if not (any(c.isalpha() for c in password) and any(c.isdigit() for c in password)):
         raise CredentialValidationError("A senha deve conter letras e números.")

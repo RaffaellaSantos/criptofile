@@ -50,7 +50,9 @@ def _ask_new_password() -> str:
 @contextmanager
 def _logged_in(service: IAMService, username: str):
     """Autentica o usuário e garante o encerramento da sessão ao final do comando."""
-    session: Session = service.authenticate(username, getpass.getpass(f"Senha de {username}: "))
+    session: Session = service.authenticate(
+        username, getpass.getpass(f"Senha de {username}: ")
+    )
     try:
         yield session
     finally:
@@ -80,15 +82,21 @@ def cmd_user_add(args: argparse.Namespace) -> None:
         service.sessions.require_role(session, Role.ADMIN)
         # Ainda não validado pela política de usernames: escapado para o Rich.
         console.print(f"Cadastrando '{escape(args.username)}' ({args.role.value}).")
-        info = service.register_user(session, args.username, _ask_new_password(), args.role)
-    console.print(f"[green]Usuário '{info.username}' ({info.role.value}) cadastrado.[/green]")
+        info = service.register_user(
+            session, args.username, _ask_new_password(), args.role
+        )
+    console.print(
+        f"[green]Usuário '{info.username}' ({info.role.value}) cadastrado.[/green]"
+    )
 
 
 def cmd_user_role(args: argparse.Namespace) -> None:
     service = _service()
     with _logged_in(service, args.as_user) as session:
         info = service.set_role(session, args.username, args.role)
-    console.print(f"[green]Papel de '{info.username}' alterado para {info.role.value}.[/green]")
+    console.print(
+        f"[green]Papel de '{info.username}' alterado para {info.role.value}.[/green]"
+    )
 
 
 def cmd_user_list(args: argparse.Namespace) -> None:
@@ -102,7 +110,9 @@ def cmd_user_list(args: argparse.Namespace) -> None:
     table.add_column("Criado em")
     table.add_column("ID", style="dim")
     for u in users:
-        table.add_row(u.username, u.role.value, f"{u.created_at:%Y-%m-%d %H:%M}", u.user_id)
+        table.add_row(
+            u.username, u.role.value, f"{u.created_at:%Y-%m-%d %H:%M}", u.user_id
+        )
     console.print(table)
 
 
@@ -115,7 +125,9 @@ def _role(value: str) -> Role:
 
 def register_iam_commands(subparsers) -> None:
     """Registra os subcomandos do módulo IAM no parser principal."""
-    p = subparsers.add_parser("admin-init", help="Cria o primeiro usuário ADMIN do sistema.")
+    p = subparsers.add_parser(
+        "admin-init", help="Cria o primeiro usuário ADMIN do sistema."
+    )
     p.add_argument("-u", "--username", type=validate_str, required=True)
     p.set_defaults(func=cmd_admin_init)
 
@@ -123,21 +135,47 @@ def register_iam_commands(subparsers) -> None:
     p.add_argument("-u", "--username", type=validate_str, required=True)
     p.set_defaults(func=cmd_login)
 
-    p = subparsers.add_parser("user-add", help="Cadastra um novo usuário (apenas ADMIN).")
-    p.add_argument("--as", dest="as_user", type=validate_str, required=True, metavar="ADMIN",
-                   help="Username do ADMIN que executa a operação.")
+    p = subparsers.add_parser(
+        "user-add", help="Cadastra um novo usuário (apenas ADMIN)."
+    )
+    p.add_argument(
+        "--as",
+        dest="as_user",
+        type=validate_str,
+        required=True,
+        metavar="ADMIN",
+        help="Username do ADMIN que executa a operação.",
+    )
     p.add_argument("-u", "--username", type=validate_str, required=True)
-    p.add_argument("-r", "--role", type=_role, default=Role.USER, metavar="{ADMIN,USER}")
+    p.add_argument(
+        "-r", "--role", type=_role, default=Role.USER, metavar="{ADMIN,USER}"
+    )
     p.set_defaults(func=cmd_user_add)
 
-    p = subparsers.add_parser("user-role", help="Altera o papel de um usuário (apenas ADMIN).")
-    p.add_argument("--as", dest="as_user", type=validate_str, required=True, metavar="ADMIN",
-                   help="Username do ADMIN que executa a operação.")
+    p = subparsers.add_parser(
+        "user-role", help="Altera o papel de um usuário (apenas ADMIN)."
+    )
+    p.add_argument(
+        "--as",
+        dest="as_user",
+        type=validate_str,
+        required=True,
+        metavar="ADMIN",
+        help="Username do ADMIN que executa a operação.",
+    )
     p.add_argument("-u", "--username", type=validate_str, required=True)
     p.add_argument("-r", "--role", type=_role, required=True, metavar="{ADMIN,USER}")
     p.set_defaults(func=cmd_user_role)
 
-    p = subparsers.add_parser("user-list", help="Lista os usuários cadastrados (apenas ADMIN).")
-    p.add_argument("--as", dest="as_user", type=validate_str, required=True, metavar="ADMIN",
-                   help="Username do ADMIN que executa a operação.")
+    p = subparsers.add_parser(
+        "user-list", help="Lista os usuários cadastrados (apenas ADMIN)."
+    )
+    p.add_argument(
+        "--as",
+        dest="as_user",
+        type=validate_str,
+        required=True,
+        metavar="ADMIN",
+        help="Username do ADMIN que executa a operação.",
+    )
     p.set_defaults(func=cmd_user_list)

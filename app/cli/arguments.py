@@ -3,11 +3,11 @@ import logging
 import sys
 import textwrap
 
+from alembic.util import CommandError
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 from rich_argparse import RawDescriptionRichHelpFormatter, RichHelpFormatter
-from alembic.util import CommandError
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from app.cli.audit_commands import register_audit_commands
@@ -21,35 +21,44 @@ from app.utils.validator import abs_path, define_name, validate_path
 logger = logging.getLogger(__name__)
 console = Console()
 
+
 class ArgumentParserPT(argparse.ArgumentParser):
     """Classe personalizada para traduzir mensagens de erro para português."""
-    def error(self, message):
-            if "expected one argument" in message:
-                message = message.replace(
-                    "expected one argument", 
-                    "esperava um caminho de arquivo"
-                )
-            
-            sys.stderr.write(f'ERRO: {message}\n\n')
 
-            self.exit(2)
+    def error(self, message):
+        if "expected one argument" in message:
+            message = message.replace(
+                "expected one argument", "esperava um caminho de arquivo"
+            )
+
+        sys.stderr.write(f"ERRO: {message}\n\n")
+
+        self.exit(2)
+
 
 def print_file_info(args: argparse.Namespace) -> None:
     """Imprime as informações coletadas do arquivo fornecido."""
     path_obj = args.path
-    
+
     info_text = (
-    f"[bold cyan]Caminho recebido :[/bold cyan] {escape(str(path_obj))}\n"
-    f"[bold cyan]Nome do arquivo  :[/bold cyan] {escape(define_name(path_obj))}\n"
-    f"[bold cyan]Caminho absoluto :[/bold cyan] {escape(abs_path(path_obj))}"
+        f"[bold cyan]Caminho recebido :[/bold cyan] {escape(str(path_obj))}\n"
+        f"[bold cyan]Nome do arquivo  :[/bold cyan] {escape(define_name(path_obj))}\n"
+        f"[bold cyan]Caminho absoluto :[/bold cyan] {escape(abs_path(path_obj))}"
     )
 
-    console.print(Panel(info_text, title="[bold green]Informações Iniciais do Arquivo[/bold green]", expand=False))
+    console.print(
+        Panel(
+            info_text,
+            title="[bold green]Informações Iniciais do Arquivo[/bold green]",
+            expand=False,
+        )
+    )
+
 
 def build_parser():
     """Constroi os argumentos a serem passados."""
     parser = ArgumentParserPT(
-        prog="criptofile", 
+        prog="criptofile",
         description=textwrap.dedent("""
             [bold green]Projeto:[/bold green] CriptoFile CLI
             [bold green]Descrição:[/bold green] Ferramenta de linha de comando (CLI) capaz de receber um arquivo, criptografar, salvar chaves e verificar integridade.
@@ -78,21 +87,21 @@ def build_parser():
         """),
         formatter_class=RawDescriptionRichHelpFormatter,
     )
-    
+
     subparsers = parser.add_subparsers(dest="command", help="Comandos disponíveis")
-    
+
     parser_info = subparsers.add_parser(
         "info",
         help="Exibe as informações iniciais do arquivo",
-        formatter_class=RichHelpFormatter
+        formatter_class=RichHelpFormatter,
     )
     parser_info.add_argument(
-        '-p',
-        '--path',
+        "-p",
+        "--path",
         type=validate_path,
         required=True,
         help="Caminho para o arquivo.",
-        metavar="caminho"
+        metavar="caminho",
     )
     parser_info.set_defaults(func=print_file_info)
 
@@ -101,6 +110,7 @@ def build_parser():
     register_audit_commands(subparsers)
 
     return parser
+
 
 def run() -> None:
     """Declara as funções necessárias para construir a aplicação."""
@@ -117,7 +127,7 @@ def run() -> None:
         parser.print_help()
         sys.exit(0)
 
-    if hasattr(args, 'func'):
+    if hasattr(args, "func"):
         try:
             args.func(args)
         except IAMError as err:

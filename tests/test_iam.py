@@ -51,7 +51,8 @@ def service(monkeypatch, tmp_path):
     svc = IAMService(factory, audit_service=audit)
     svc.bootstrap_admin("admin", ADMIN_PW)
     svc._factory = factory
-    return svc
+    yield svc
+    engine.dispose()
 
 
 def _admin(service):
@@ -152,6 +153,48 @@ def test_credential_policy(service, username, password):
         service.register_user(_admin(service), username, password)
 
 
+@pytest.mark.parametrize(
+    "username",
+    ["abc..", ".abc", "-abc", "abc_", "...", "con", "NUL", "com1", "Lpt9", "a" * 33, "../etc"],
+)
+def test_username_must_be_a_safe_directory_name(service, username):
+    """O username vira workspace/<username>: nomes que o SO trataria de forma
+    especial (pontos finais, dispositivos do Windows, traversal) são recusados."""
+    with pytest.raises(CredentialValidationError):
+        service.register_user(_admin(service), username, USER_PW)
+
+
+@pytest.mark.parametrize("username", ["ana", "a.b", "user_1", "Ana-Maria", "console"])
+def test_valid_usernames_are_accepted(service, username):
+    assert service.register_user(_admin(service), username, USER_PW).username == username
+
+
+def test_username_uniqueness_ignores_case(service):
+    """"Bob" e "bob" dividiriam o workspace em sistemas case-insensitive."""
+    admin = _admin(service)
+    service.register_user(admin, "bob", USER_PW)
+    with pytest.raises(UserAlreadyExistsError):
+        service.register_user(admin, "BOB", USER_PW)
+    with pytest.raises(UserAlreadyExistsError):
+        service.register_user(admin, "Admin", USER_PW)
+
+
+def test_password_is_never_logged_or_audited(service, caplog):
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    service.register_user(_admin(service), "alice", USER_PW)
+    with pytest.raises(AuthenticationError):
+        service.authenticate("alice", "Errada12345")
+    service.authenticate("alice", USER_PW)
+
+    with service._factory() as db:
+        details = " ".join(e.details or "" for e in db.scalars(select(AuditLog)))
+    for secret in (USER_PW, ADMIN_PW, "Errada12345"):
+        assert secret not in caplog.text
+        assert secret not in details
+
+
 # 02.2 - Gestão de acesso apenas por ADMIN -------------------------------- #
 def test_admin_can_change_role(service):
     admin = _admin(service)
@@ -182,6 +225,62 @@ def test_user_cannot_list_users(service):
     with pytest.raises(AuthorizationError):
         service.list_users(alice)
     assert [u.username for u in service.list_users(_admin(service))] == ["admin", "alice"]
+
+
+def test_promoted_user_gains_admin_powers(service):
+    admin = _admin(service)
+    service.register_user(admin, "alice", USER_PW)
+    service.set_role(admin, "alice", Role.ADMIN)
+
+    alice = service.authenticate("alice", USER_PW)
+    assert service.register_user(alice, "carol", "Carol12345").role == Role.USER
+    # Com dois ADMIN, rebaixar um deles passa a ser permitido.
+    assert service.set_role(alice, "admin", Role.USER).role == Role.USER
+
+
+def test_role_change_is_audited(service):
+    admin = _admin(service)
+    service.register_user(admin, "alice", USER_PW)
+    service.set_role(admin, "alice", Role.ADMIN)
+
+    with service._factory() as db:
+        event = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action_type == AuditAction.USER_ROLE_CHANGE.value
+            )
+        )
+    assert event.username == "admin"
+    assert event.resource_id == "alice"
+    assert '"old_role": "USER"' in event.details
+    assert '"new_role": "ADMIN"' in event.details
+
+
+def test_user_creation_is_audited_with_creator(service):
+    service.register_user(_admin(service), "alice", USER_PW)
+    with service._factory() as db:
+        event = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action_type == AuditAction.USER_CREATE.value,
+                AuditLog.username == "alice",
+            )
+        )
+    assert event.status == AuditStatus.SUCCESS
+    assert '"by": "admin"' in event.details
+    assert USER_PW not in event.details
+
+
+def test_get_user_requires_session_and_existing_user(service):
+    admin = _admin(service)
+    assert service.get_user(admin, " admin ").role == Role.ADMIN
+    with pytest.raises(UserNotFoundError):
+        service.get_user(admin, "ghost")
+    service.logout(admin)
+    with pytest.raises(AuthenticationError):
+        service.get_user(admin, "admin")
+
+
+def test_has_users_reflects_bootstrap(service):
+    assert service.has_users()
 
 
 # 05.1 - Detecção de força bruta ------------------------------------------- #

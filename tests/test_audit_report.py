@@ -31,12 +31,13 @@ def factory():
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
     Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine)
+    yield sessionmaker(bind=engine)
+    engine.dispose()
 
 
 @pytest.fixture
-def audit(factory):
-    return AuditService(factory, hmac_key=TEST_HMAC_KEY, key_file="/tmp/.audit_key_test")
+def audit(factory, tmp_path):
+    return AuditService(factory, hmac_key=TEST_HMAC_KEY, key_file=str(tmp_path / ".audit_key"))
 
 
 @pytest.fixture

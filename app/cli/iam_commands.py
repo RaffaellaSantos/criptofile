@@ -2,11 +2,12 @@ import argparse
 import getpass
 import logging
 from contextlib import contextmanager
-from pathlib import Path
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
+from app.core.config import PROJECT_ROOT
 from app.core.session import Session
 from app.exceptions.iam_exceptions import IAMError
 from app.model.user_model import Role
@@ -22,7 +23,7 @@ def _run_migrations() -> None:
     from alembic import command
     from alembic.config import Config
 
-    alembic_ini = Path(__file__).resolve().parents[2] / "alembic.ini"
+    alembic_ini = PROJECT_ROOT / "alembic.ini"
     command.upgrade(Config(str(alembic_ini)), "head")
 
 
@@ -30,10 +31,12 @@ def _service() -> IAMService:
     # Importação tardia: o banco só é acessado pelos comandos que precisam dele.
     from app.core.database import SessionLocal, get_engine
 
-    _run_migrations()
     # Cria o engine e o vincula ao SessionLocal (o bind é preguiçoso; sem
     # esta chamada a sessão é criada sem destino e falha no primeiro uso).
+    # Vem antes das migrações para que uma DATABASE_URL ausente seja
+    # reportada com mensagem clara, e não como erro interno do Alembic.
     get_engine()
+    _run_migrations()
     return IAMService(SessionLocal)
 
 
@@ -75,7 +78,8 @@ def cmd_user_add(args: argparse.Namespace) -> None:
     with _logged_in(service, args.as_user) as session:
         # Verifica a permissão antes de pedir a senha do novo usuário.
         service.sessions.require_role(session, Role.ADMIN)
-        console.print(f"Cadastrando '{args.username}' ({args.role.value}).")
+        # Ainda não validado pela política de usernames: escapado para o Rich.
+        console.print(f"Cadastrando '{escape(args.username)}' ({args.role.value}).")
         info = service.register_user(session, args.username, _ask_new_password(), args.role)
     console.print(f"[green]Usuário '{info.username}' ({info.role.value}) cadastrado.[/green]")
 

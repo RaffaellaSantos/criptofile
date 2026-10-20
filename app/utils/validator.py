@@ -28,10 +28,10 @@ def validate_path(value: str) -> Path:
     
     return path
 
-def define_name(pdf_path: Path) -> str:
+def define_name(path: Path) -> str:
     """Define o nome do arquivo sem extensão."""
-    logger.debug(f"Definindo nome do arquivo para: {pdf_path.stem}")
-    return pdf_path.stem
+    logger.debug(f"Definindo nome do arquivo para: {path.stem}")
+    return path.stem
 
 def abs_path(path: Path) -> str:
     """Retorna o caminho absoluto do arquivo."""

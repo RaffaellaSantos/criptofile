@@ -3,11 +3,13 @@ import logging
 from pathlib import Path
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
 from app.cli.iam_commands import _logged_in, _service
 from app.model.audit_log_model import AuditAction, AuditLog
+from app.service.audit_service import AUDIT_TRUNCATED
 from app.utils.validator import validate_str
 
 logger = logging.getLogger(__name__)
@@ -39,11 +41,22 @@ def cmd_audit_report(args: argparse.Namespace) -> None:
         )
 
     if tampered:
+        events_hit = [t for t in tampered if t != AUDIT_TRUNCATED]
+        lines = []
+        if events_hit:
+            lines.append(
+                f"[bold red]ATENÇÃO:[/bold red] {len(events_hit)} registro(s) do log foram "
+                f"ADULTERADOS ou tiveram o evento anterior REMOVIDO.\n"
+                f"Eventos comprometidos: {', '.join(t[:8] for t in events_hit)}"
+            )
+        if AUDIT_TRUNCATED in tampered:
+            lines.append(
+                "[bold red]ATENÇÃO:[/bold red] os eventos mais recentes do log foram "
+                "REMOVIDOS (a ponta registrada da cadeia não existe mais no banco)."
+            )
         console.print(
             Panel(
-                f"[bold red]ATENÇÃO:[/bold red] {len(tampered)} registro(s) do log "
-                f"foram ADULTERADOS (assinatura HMAC inválida).\n"
-                f"Eventos comprometidos: {', '.join(t[:8] for t in tampered)}",
+                "\n\n".join(lines),
                 title="[bold red]Integridade do Log[/bold red]",
                 expand=False,
             )
@@ -56,9 +69,9 @@ def cmd_audit_report(args: argparse.Namespace) -> None:
 
     title = "Relatório de Logs de Auditoria"
     if args.user:
-        title += f" — usuário: {args.user}"
+        title += f" — usuário: {escape(args.user)}"
     if args.action:
-        title += f" — ação: {args.action}"
+        title += f" — ação: {escape(args.action)}"
 
     table = Table(title=title)
     table.add_column("Data/Hora (UTC)")
@@ -68,15 +81,18 @@ def cmd_audit_report(args: argparse.Namespace) -> None:
     table.add_column("Status")
     table.add_column("Origem")
     table.add_column("Detalhes", style="dim", overflow="fold")
+    # Campos do log vêm de entradas do usuário (nomes de arquivo, usernames
+    # tentados no login): são escapados para que marcação do Rich embutida
+    # neles não falsifique ou oculte linhas do relatório.
     for event in events:
         table.add_row(
             f"{event.timestamp:%Y-%m-%d %H:%M:%S}",
-            event.username or "-",
-            event.action_type,
-            event.resource_id or "-",
+            escape(event.username or "-"),
+            escape(event.action_type),
+            escape(event.resource_id or "-"),
             _status(event),
-            f"{event.ip_address}@{event.hostname}" if event.hostname else "-",
-            event.details or "-",
+            escape(f"{event.ip_address}@{event.hostname}") if event.hostname else "-",
+            escape(event.details or "-"),
         )
     console.print(table)
     console.print(f"[green]{len(events)} evento(s) listado(s).[/green]")
@@ -94,13 +110,15 @@ def _write_export(content: str, output: str | None) -> None:
     if output:
         path = Path(output)
         if path.exists() and path.is_dir():
-            console.print(f"[red]Erro:[/red] '{path}' é um diretório.")
+            console.print(f"[red]Erro:[/red] '{escape(str(path))}' é um diretório.")
             raise SystemExit(2)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-        console.print(f"[green]Relatório exportado para '{path}'.[/green]")
+        console.print(f"[green]Relatório exportado para '{escape(str(path))}'.[/green]")
     else:
-        console.print(content)
+        # Saída crua: o console do Rich quebraria linhas longas e interpretaria
+        # trechos entre colchetes como marcação, corrompendo JSON/CEF em pipes.
+        print(content)
 
 
 def _status(event: AuditLog) -> str:

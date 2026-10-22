@@ -197,9 +197,10 @@ class AuditService:
         if registered is not None and not self._head_is_valid(*registered):
             # O alarme de truncamento é persistente: novos eventos não podem
             # sobrescrever a evidência de que a ponta anterior sumiu do banco.
-            logger.error(
-                "AUDIT_TRUNCATED: a ponta registrada do log não existe mais; o registro "
-                "da ponta foi mantido como evidência (veja o relatório de auditoria)."
+            # Silencioso: o alarme é emitido uma vez por verify_integrity, e não
+            # a cada evento gravado depois do truncamento.
+            logger.debug(
+                "AUDIT_HEAD: ponta anterior mantida como evidência de truncamento."
             )
             return
         tmp_path = None

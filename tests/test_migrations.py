@@ -94,3 +94,20 @@ def test_migrations_roundtrip_on_postgresql(monkeypatch):
     finally:
         command.downgrade(config, "base")
     assert _columns(POSTGRES_TEST_URL) == {}
+
+
+def test_app_logging_survives_migrations(db_url):
+    """Rodar as migrações pela aplicação não substitui o logging dela."""
+    import logging
+
+    root = logging.getLogger()
+    sentinel = logging.NullHandler()
+    root.addHandler(sentinel)
+    level = root.level
+    try:
+        _run_migrations()
+        assert sentinel in root.handlers
+        assert root.level == level
+        assert logging.getLogger("alembic").level == logging.WARNING
+    finally:
+        root.removeHandler(sentinel)

@@ -34,6 +34,7 @@ from app.service.file_cryptography_service import FileCryptoService
 ADMIN_PW = "Admin12345"
 BOB_PW = "Bob123456"
 TEST_HMAC_KEY = bytes(range(32))
+WIDE_CONSOLE = 1000
 # Implementação real, guardada antes de a fixture substituí-la.
 REAL_SERVICE = iam_commands._service
 
@@ -64,6 +65,11 @@ def cli(monkeypatch, tmp_path):
 
     for module in (iam_commands, file_cryptography_commands, audit_commands):
         monkeypatch.setattr(module, "_service", service)
+    # Sem terminal, o Rich quebra as linhas em 80 colunas: frases com caminhos
+    # longos (o tmp_path varia por máquina) seriam partidas no meio e as
+    # asserções sobre a saída falhariam conforme o ambiente. Largura fixa.
+    for module in (arguments, iam_commands, file_cryptography_commands, audit_commands):
+        monkeypatch.setattr(module, "console", Console(width=WIDE_CONSOLE))
     monkeypatch.setattr(file_cryptography_commands, "SessionLocal", factory)
     monkeypatch.setattr(
         FileCryptoService,
@@ -681,11 +687,9 @@ def test_markup_in_username_cannot_crash_user_add(ready, caplog):
     assert "Username deve ter" in caplog.text
 
 
-def test_markup_in_audit_log_cannot_spoof_report(ready, capsys, monkeypatch):
+def test_markup_in_audit_log_cannot_spoof_report(ready, capsys):
     """Um username forjado no login não pode quebrar nem falsificar o relatório."""
     run, _, _ = ready
-    # Console largo: a tabela não quebra o username forjado em duas linhas.
-    monkeypatch.setattr(audit_commands, "console", Console(width=300))
     for forged in ("[/]", "[green]SUCCESS[/green]"):
         assert run("login", "-u", forged, passwords=["qualquer123"]) == 1
 
@@ -769,9 +773,8 @@ def test_file_list_error_exits_with_code_1(ready, capsys, monkeypatch):
     assert "sem acesso ao banco de arquivos" in capsys.readouterr().out
 
 
-def test_report_title_shows_user_filter(ready, capsys, monkeypatch):
+def test_report_title_shows_user_filter(ready, capsys):
     run, _, _ = ready
-    monkeypatch.setattr(audit_commands, "console", Console(width=200))
     assert run("audit-report", "--as", "admin", "-u", "bob", passwords=[ADMIN_PW]) == 0
     assert "usuário: bob" in capsys.readouterr().out
 
@@ -809,9 +812,8 @@ def test_unreachable_database_exits_with_code_1(cli, caplog, monkeypatch):
     assert "Recusada" in caplog.text
 
 
-def test_report_explains_truncated_log(ready, capsys, monkeypatch):
+def test_report_explains_truncated_log(ready, capsys):
     run, factory, _ = ready
-    monkeypatch.setattr(audit_commands, "console", Console(width=200))
     with factory() as db:
         newest = db.scalars(
             select(AuditLog).order_by(AuditLog.timestamp.desc())

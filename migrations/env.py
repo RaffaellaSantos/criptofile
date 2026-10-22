@@ -19,7 +19,11 @@ config = context.config
 # A URL do banco vem do .env da aplicação, não do alembic.ini.
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
-if config.config_file_name is not None:
+# Quando chamado pela aplicação (configure_logger=False), o logging dela é
+# mantido; pela linha de comando `alembic`, vale o [loggers] do alembic.ini.
+if config.config_file_name is not None and config.attributes.get(
+    "configure_logger", True
+):
     # disable_existing_loggers=False preserva os loggers da aplicação
     # quando as migrações são executadas a partir do código (CLI).
     fileConfig(config.config_file_name, disable_existing_loggers=False)

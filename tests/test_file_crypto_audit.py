@@ -1,3 +1,4 @@
+import errno
 import hashlib
 import os
 import pathlib
@@ -2073,7 +2074,7 @@ def test_genkeys_for_user_removed_from_db(env):
         crypto.generate_keys(bob_session, force=True)
 
 
-def test_decrypt_replace_failure_cleans_up(env, monkeypatch):
+def test_decrypt_publish_failure_cleans_up(env, monkeypatch):
     _, crypto, _, session, _, tmp_path = env
     enc_path = crypto.encrypt_file(session, _source_file(tmp_path, "doc.pdf"))
 
@@ -2081,11 +2082,69 @@ def test_decrypt_replace_failure_cleans_up(env, monkeypatch):
         raise PermissionError(13, "arquivo em uso")
 
     with monkeypatch.context() as m:
+        m.setattr(fcs.os, "link", locked)
         m.setattr(fcs.os, "replace", locked)
         with pytest.raises(FilePermissionError):
             crypto.decrypt_file(session, enc_path)
 
     assert sorted(os.listdir(tmp_path / "admin")) == ["doc.pdf.enc", "private.pem"]
+
+
+def test_destination_name_appears_only_after_validation(env, monkeypatch):
+    """Durante a decifragem nada existe com o nome de destino: uma queda do
+    processo nesse momento não deixa arquivo vazio nem parcial no lugar."""
+    _, crypto, _, session, _, tmp_path = env
+    enc_path = crypto.encrypt_file(
+        session, _source_file(tmp_path, "doc.pdf", b"conteudo")
+    )
+    final = tmp_path / "admin" / "doc.pdf"
+    real_stream = fcs.decrypt_stream
+    seen_during_stream = []
+
+    def spy(src, dst, key):
+        seen_during_stream.append(final.exists())
+        return real_stream(src, dst, key)
+
+    monkeypatch.setattr(fcs, "decrypt_stream", spy)
+    crypto.decrypt_file(session, enc_path)
+
+    assert seen_during_stream == [False]
+    assert final.read_bytes() == b"conteudo"
+
+
+def test_decrypt_without_hardlink_support_falls_back(env, monkeypatch):
+    _, crypto, _, session, _, tmp_path = env
+    enc_path = crypto.encrypt_file(
+        session, _source_file(tmp_path, "doc.pdf", b"conteudo")
+    )
+
+    def unsupported(src, dst):
+        raise OSError(errno.EXDEV, "hardlink não suportado")
+
+    monkeypatch.setattr(fcs.os, "link", unsupported)
+    out = crypto.decrypt_file(session, enc_path)
+
+    assert _read(out) == b"conteudo"
+    assert _temp_files(tmp_path / "admin") == []
+
+
+def test_destination_created_meanwhile_is_not_overwritten(env, monkeypatch):
+    """Se outro processo criar o destino durante a decifragem, ele é preservado."""
+    _, crypto, _, session, _, tmp_path = env
+    enc_path = crypto.encrypt_file(session, _source_file(tmp_path, "doc.pdf"))
+    final = tmp_path / "admin" / "doc.pdf"
+    real_stream = fcs.decrypt_stream
+
+    def other_process_writes(src, dst, key):
+        final.write_bytes(b"do outro processo")
+        return real_stream(src, dst, key)
+
+    monkeypatch.setattr(fcs, "decrypt_stream", other_process_writes)
+    with pytest.raises(FileAlreadyExistsError):
+        crypto.decrypt_file(session, enc_path)
+
+    assert final.read_bytes() == b"do outro processo"
+    assert _temp_files(tmp_path / "admin") == []
 
 
 def test_read_failure_mid_stream_is_reported(env, monkeypatch):

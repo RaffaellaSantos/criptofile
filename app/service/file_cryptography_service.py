@@ -1,4 +1,5 @@
 import contextlib
+import errno
 import logging
 import os
 import stat
@@ -194,6 +195,30 @@ def _stale_temps(directory: str, kind: str, min_age: float) -> list[str]:
             if now - os.path.getmtime(path) >= min_age:
                 stale.append(path)
     return stale
+
+
+def _publish_new(src: str, dst: str) -> None:
+    """Dá ao arquivo `src` o nome `dst` sem nunca sobrescrever (FileExistsError).
+
+    O hardlink é atômico e falha se `dst` existir (inclusive um symlink), sem
+    deixar nada para trás se o processo cair antes. Em sistemas de arquivos
+    sem hardlink, reserva o nome com O_EXCL e troca.
+    """
+    try:
+        os.link(src, dst)
+    except FileExistsError:
+        raise
+    except OSError:
+        with _new_file(dst):
+            pass
+        try:
+            os.replace(src, dst)
+        except OSError:
+            _discard(dst)
+            raise
+        return
+    with contextlib.suppress(OSError):
+        os.remove(src)
 
 
 def _installed_by_recovery(tmp_path: str, error: OSError) -> bool:
@@ -647,7 +672,8 @@ class FileCryptoService:
             "DEK do registro inválida para este usuário",
         )
 
-        # Reserva o nome de destino (0600, sem sobrescrever) antes de decifrar.
+        # Confere o destino antes de decifrar (falha rápida); a publicação no
+        # final é atômica e também recusa um destino criado nesse intervalo.
         try:
             if output_path:
                 final_out = abs_path(output_path)
@@ -664,22 +690,17 @@ class FileCryptoService:
                     "ORPHAN_PLAINTEXT: removendo temporário órfão '%s'.", orphan
                 )
                 _discard(orphan)
-            with _new_file(final_out):
-                pass
+            if os.path.lexists(final_out):
+                raise FileExistsError(errno.EEXIST, "destino já existe", final_out)
         except FileExistsError as e:
-            logger.error(
-                "FILE_EXISTS: Destino da descriptografia já existe: %s", final_out
+            return self._decrypt_destination_exists(
+                session, encrypted_path, final_out, e
             )
-            self._audit_decrypt_fail(
-                session, encrypted_path, "arquivo de destino já existe"
-            )
-            raise FileAlreadyExistsError(
-                f"Já existe um arquivo em '{final_out}'. "
-                "Mova-o ou informe outro destino com -o."
-            ) from e
         except OSError as e:
             return self._decrypt_write_failed(session, encrypted_path, e)
 
+        # Em caso de falha de validação, o temporário já é descartado pelo
+        # próprio `_temp_file`; nada fica com o nome de destino.
         tmp_path = None
         try:
             with _temp_file(os.path.dirname(final_out), kind="plain") as (
@@ -689,17 +710,17 @@ class FileCryptoService:
                 self._stream_validated(
                     session, file_id, access, dek, encrypted_path, action, tmp_file
                 )
-            os.replace(tmp_path, final_out)
+            _publish_new(tmp_path, final_out)
             tmp_path = None
+        except FileExistsError as e:
+            _discard(tmp_path)
+            return self._decrypt_destination_exists(
+                session, encrypted_path, final_out, e
+            )
         except OSError as e:
-            _discard(final_out)
             if tmp_path is not None:
                 _discard(tmp_path)
             return self._decrypt_write_failed(session, encrypted_path, e)
-        except BaseException:
-            # Validação falhou (o temporário já foi descartado): libera o nome.
-            _discard(final_out)
-            raise
 
         details = {"output": final_out}
         # O texto claro já foi entregue: falhar ao consumir o .enc não desfaz
@@ -727,6 +748,18 @@ class FileCryptoService:
             details=details,
         )
         return final_out
+
+    def _decrypt_destination_exists(
+        self, session: Session, encrypted_path: str, final_out: str, error: OSError
+    ):
+        logger.error("FILE_EXISTS: Destino da descriptografia já existe: %s", final_out)
+        self._audit_decrypt_fail(
+            session, encrypted_path, "arquivo de destino já existe"
+        )
+        raise FileAlreadyExistsError(
+            f"Já existe um arquivo em '{final_out}'. "
+            "Mova-o ou informe outro destino com -o."
+        ) from error
 
     def _decrypt_write_failed(
         self, session: Session, encrypted_path: str, error: OSError

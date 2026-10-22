@@ -23,8 +23,14 @@ def _run_migrations() -> None:
     from alembic import command
     from alembic.config import Config
 
-    alembic_ini = PROJECT_ROOT / "alembic.ini"
-    command.upgrade(Config(str(alembic_ini)), "head")
+    config = Config(str(PROJECT_ROOT / "alembic.ini"))
+    # A CLI já configurou o logging (setup_logging). Se o env.py aplicasse o
+    # [loggers] do alembic.ini, substituiria os handlers da aplicação: o
+    # app.log (JSON) deixaria de receber eventos e a sanitização do console
+    # (sequências ANSI) seria perdida.
+    config.attributes["configure_logger"] = False
+    logging.getLogger("alembic").setLevel(logging.WARNING)
+    command.upgrade(config, "head")
 
 
 def _service() -> IAMService:

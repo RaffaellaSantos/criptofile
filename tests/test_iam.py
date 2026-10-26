@@ -345,6 +345,24 @@ def test_security_alert_recorded_once_per_outburst(service):
     assert "forca_bruta" in alerts[0].details
 
 
+def test_blocked_login_is_recorded_in_audit_log(service):
+    _fails(service, 4)  # emitirá o SECURITY_ALERT e ativa o bloqueio
+    with pytest.raises(AccountLockedError, match="bloqueada"):
+        service.authenticate("admin", ADMIN_PW)
+    with service._factory() as db:
+        events = db.scalars(
+            select(AuditLog)
+            .where(
+                AuditLog.action_type == AuditAction.LOGIN.value,
+                AuditLog.username == "admin",
+            )
+            .order_by(AuditLog.timestamp.desc(), AuditLog.event_id.desc())
+        ).all()
+    last = events[0]
+    assert last.status == AuditStatus.FAIL
+    assert '"conta_bloqueada"' in last.details
+
+
 def test_successful_login_resets_counter(service):
     _fails(service, 3)
     service.authenticate("admin", ADMIN_PW)  # SUCCESS zera o contador

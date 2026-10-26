@@ -96,7 +96,10 @@ class IAMService:
 
         if len(failures) > MAX_LOGIN_FAILURES:
             # O bloqueio termina quando a falha mais antiga do grupo bloqueador
-            # (a 4ª mais recente) sai da janela de 60s.
+            # (a 4ª mais recente) sai da janela de 60s. A tentativa bloqueada
+            # também é registrada como falha (abaixo), então tentativas
+            # contínuas empurram o grupo bloqueador para frente e mantêm a conta
+            # bloqueada enquanto o ataque persistir.
             unlock_in = max(
                 1,
                 math.ceil(
@@ -110,6 +113,17 @@ class IAMService:
                 user.username,
                 len(failures),
                 BRUTE_FORCE_WINDOW.total_seconds(),
+            )
+            self.audit.record(
+                AuditAction.LOGIN,
+                user_id=user.user_id,
+                username=user.username,
+                status=AuditStatus.FAIL,
+                details={
+                    "reason": "conta_bloqueada",
+                    "failures": len(failures),
+                    "window_seconds": int(BRUTE_FORCE_WINDOW.total_seconds()),
+                },
             )
             raise AccountLockedError(
                 "Conta temporariamente bloqueada por excesso de falhas de login. "

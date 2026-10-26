@@ -15,6 +15,8 @@ class AuditAction(StrEnum):
     LOGOUT = "LOGOUT"
     USER_CREATE = "USER_CREATE"
     USER_ROLE_CHANGE = "USER_ROLE_CHANGE"
+    # Listagem de usuários (apenas ADMIN); tentativas negadas são auditadas.
+    USER_LIST = "USER_LIST"
     KEYS_GENERATE = "KEYS_GENERATE"
     FILE_ENCRYPT = "FILE_ENCRYPT"
     FILE_DECRYPT = "FILE_DECRYPT"

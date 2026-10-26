@@ -250,10 +250,29 @@ def test_user_cannot_list_users(service):
     alice = service.authenticate("alice", USER_PW)
     with pytest.raises(AuthorizationError):
         service.list_users(alice)
+    # A tentativa negada deve ser registrada no log de auditoria.
+    with service._factory() as db:
+        event = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action_type == AuditAction.USER_LIST.value,
+                AuditLog.status == AuditStatus.FAIL.value,
+            )
+        )
+    assert event.username == "alice"
+    assert "acesso negado" in event.details
     assert [u.username for u in service.list_users(_admin(service))] == [
         "admin",
         "alice",
     ]
+    with service._factory() as db:
+        success = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action_type == AuditAction.USER_LIST.value,
+                AuditLog.status == AuditStatus.SUCCESS.value,
+            )
+        )
+    assert success.username == "admin"
+    assert '"users": 2' in success.details
 
 
 def test_promoted_user_gains_admin_powers(service):

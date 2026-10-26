@@ -387,11 +387,23 @@ class IAMService:
         return info
 
     def list_users(self, session: Session) -> list[UserInfo]:
-        """Lista os usuários cadastrados. Apenas ADMIN."""
-        self.sessions.require_role(session, Role.ADMIN)
+        """Lista os usuários cadastrados. Apenas ADMIN.
+
+        O acesso é auditado nos dois sentidos: tentativa de usuário sem
+        papel ADMIN grava `USER_LIST (FAIL)` com o motivo do bloqueio, e
+        uma listagem bem-sucedida grava `USER_LIST (SUCCESS)`.
+        """
+        self.require_admin(session, action=AuditAction.USER_LIST)
         with self._db() as db:
             users = db.scalars(select(User).order_by(User.created_at)).all()
-            return [_to_info(u) for u in users]
+            infos = [_to_info(u) for u in users]
+        self.audit.record(
+            AuditAction.USER_LIST,
+            user_id=session.user_id,
+            username=session.username,
+            details={"users": len(infos)},
+        )
+        return infos
 
     def get_user(self, session: Session, username: str) -> UserInfo:
         """Consulta um usuário pelo username (ex.: destinatário de compartilhamento)."""

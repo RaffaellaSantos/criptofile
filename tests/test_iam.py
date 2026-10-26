@@ -298,6 +298,23 @@ def test_user_creation_is_audited_with_creator(service):
     assert USER_PW not in event.details
 
 
+def test_denied_user_creation_is_audited(service):
+    service.register_user(_admin(service), "alice", USER_PW)
+    alice = service.authenticate("alice", USER_PW)
+    with pytest.raises(AuthorizationError):
+        service.register_user(alice, "carol", USER_PW)
+    with service._factory() as db:
+        event = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action_type == AuditAction.USER_CREATE.value,
+                AuditLog.status == AuditStatus.FAIL.value,
+            )
+        )
+    assert event.username == "alice"
+    assert event.resource_id == "carol"
+    assert "acesso negado" in event.details
+
+
 def test_get_user_requires_session_and_existing_user(service):
     admin = _admin(service)
     assert service.get_user(admin, " admin ").role == Role.ADMIN

@@ -246,6 +246,11 @@ def test_user_cannot_add_users(ready, caplog):
     run, factory, _ = ready
     assert run("user-add", "--as", "bob", "-u", "carol", passwords=[BOB_PW]) == 1
     assert "apenas para usuários ADMIN" in caplog.text
+    # A tentativa negada deve ser registrada no log de auditoria.
+    denied = _last_event(factory, AuditAction.USER_CREATE)
+    assert denied.status == AuditStatus.FAIL
+    assert denied.username == "bob"
+    assert denied.resource_id == "carol"
     with factory() as db:
         assert db.scalar(select(User).where(User.username == "carol")) is None
 

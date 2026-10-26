@@ -221,6 +221,37 @@ class IAMService:
     # ------------------------------------------------------------------ #
     # Cadastro (01.1 + 02.1)
     # ------------------------------------------------------------------ #
+    def require_admin(
+        self,
+        session: Session,
+        *,
+        action: AuditAction,
+        resource_id: str | None = None,
+    ) -> Session:
+        """Exige papel ADMIN e audita a tentativa negada como `action (FAIL)`.
+
+        Usado antes de operações restritas a ADMIN (02.1, 02.2) — inclusive
+        para checagens antecipadas da CLI, para que a tentativa negada
+        chegue ao log de auditoria por qualquer caminho de chamada.
+        """
+        try:
+            return self.sessions.require_role(session, Role.ADMIN)
+        except AuthorizationError:
+            logger.warning(
+                "%s FAIL: '%s' tentou executar a operação sem permissão.",
+                action.value,
+                session.username,
+            )
+            self.audit.record(
+                action,
+                user_id=session.user_id,
+                username=session.username,
+                resource_id=resource_id,
+                status=AuditStatus.FAIL,
+                details={"reason": "acesso negado: papel insuficiente"},
+            )
+            raise
+
     def has_users(self) -> bool:
         with self._db() as db:
             return bool(db.scalar(select(func.count()).select_from(User)))
@@ -245,8 +276,14 @@ class IAMService:
     def register_user(
         self, session: Session, username: str, password: str, role: Role = Role.USER
     ) -> UserInfo:
-        """Cadastra um novo usuário. Apenas ADMIN (Requisito 02.1)."""
-        admin = self.sessions.require_role(session, Role.ADMIN)
+        """Cadastra um novo usuário. Apenas ADMIN (Requisito 02.1).
+
+        A tentativa de usuário sem papel ADMIN também é auditada, como
+        `USER_CREATE (FAIL)` com o motivo do bloqueio.
+        """
+        admin = self.require_admin(
+            session, action=AuditAction.USER_CREATE, resource_id=username
+        )
         info = self._create_user(username, password, Role(role))
         logger.info(
             "USER_CREATE: '%s' (%s) criado por '%s'.",
@@ -300,8 +337,14 @@ class IAMService:
     # Gestão de acesso (02.2)
     # ------------------------------------------------------------------ #
     def set_role(self, session: Session, username: str, role: Role) -> UserInfo:
-        """Altera o papel de um usuário. Apenas ADMIN (Requisito 02.2)."""
-        admin = self.sessions.require_role(session, Role.ADMIN)
+        """Altera o papel de um usuário. Apenas ADMIN (Requisito 02.2).
+
+        A tentativa de usuário sem papel ADMIN também é auditada, como
+        `USER_ROLE_CHANGE (FAIL)` com o motivo do bloqueio.
+        """
+        admin = self.require_admin(
+            session, action=AuditAction.USER_ROLE_CHANGE, resource_id=username
+        )
         role = Role(role)
 
         with self._db() as db:
@@ -375,22 +418,7 @@ class IAMService:
         `AUDIT_REPORT (SUCCESS)` e uma tentativa de usuário sem papel ADMIN
         grava `AUDIT_REPORT (FAIL)` com o motivo do bloqueio.
         """
-        try:
-            active = self.sessions.require_role(session, Role.ADMIN)
-        except AuthorizationError:
-            logger.warning(
-                "AUDIT_REPORT FAIL: '%s' tentou ler o relatório sem permissão.",
-                session.username,
-            )
-            self.audit.record(
-                AuditAction.AUDIT_REPORT,
-                user_id=session.user_id,
-                username=session.username,
-                status=AuditStatus.FAIL,
-                details={"reason": "acesso negado: papel insuficiente"},
-            )
-            raise
-
+        active = self.require_admin(session, action=AuditAction.AUDIT_REPORT)
         events = self.audit.list_events(username=username, action_type=action_type)
         self.audit.record(
             AuditAction.AUDIT_REPORT,

@@ -250,10 +250,29 @@ def test_user_cannot_list_users(service):
     alice = service.authenticate("alice", USER_PW)
     with pytest.raises(AuthorizationError):
         service.list_users(alice)
+    # A tentativa negada deve ser registrada no log de auditoria.
+    with service._factory() as db:
+        event = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action_type == AuditAction.USER_LIST.value,
+                AuditLog.status == AuditStatus.FAIL.value,
+            )
+        )
+    assert event.username == "alice"
+    assert "acesso negado" in event.details
     assert [u.username for u in service.list_users(_admin(service))] == [
         "admin",
         "alice",
     ]
+    with service._factory() as db:
+        success = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action_type == AuditAction.USER_LIST.value,
+                AuditLog.status == AuditStatus.SUCCESS.value,
+            )
+        )
+    assert success.username == "admin"
+    assert '"users": 2' in success.details
 
 
 def test_promoted_user_gains_admin_powers(service):
@@ -296,6 +315,23 @@ def test_user_creation_is_audited_with_creator(service):
     assert event.status == AuditStatus.SUCCESS
     assert '"by": "admin"' in event.details
     assert USER_PW not in event.details
+
+
+def test_denied_user_creation_is_audited(service):
+    service.register_user(_admin(service), "alice", USER_PW)
+    alice = service.authenticate("alice", USER_PW)
+    with pytest.raises(AuthorizationError):
+        service.register_user(alice, "carol", USER_PW)
+    with service._factory() as db:
+        event = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action_type == AuditAction.USER_CREATE.value,
+                AuditLog.status == AuditStatus.FAIL.value,
+            )
+        )
+    assert event.username == "alice"
+    assert event.resource_id == "carol"
+    assert "acesso negado" in event.details
 
 
 def test_get_user_requires_session_and_existing_user(service):
@@ -343,6 +379,24 @@ def test_security_alert_recorded_once_per_outburst(service):
     assert len(alerts) == 1
     assert alerts[0].username == "admin"
     assert "forca_bruta" in alerts[0].details
+
+
+def test_blocked_login_is_recorded_in_audit_log(service):
+    _fails(service, 4)  # emitirá o SECURITY_ALERT e ativa o bloqueio
+    with pytest.raises(AccountLockedError, match="bloqueada"):
+        service.authenticate("admin", ADMIN_PW)
+    with service._factory() as db:
+        events = db.scalars(
+            select(AuditLog)
+            .where(
+                AuditLog.action_type == AuditAction.LOGIN.value,
+                AuditLog.username == "admin",
+            )
+            .order_by(AuditLog.timestamp.desc(), AuditLog.event_id.desc())
+        ).all()
+    last = events[0]
+    assert last.status == AuditStatus.FAIL
+    assert '"conta_bloqueada"' in last.details
 
 
 def test_successful_login_resets_counter(service):

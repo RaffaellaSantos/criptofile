@@ -10,6 +10,7 @@ from rich.table import Table
 from app.core.config import PROJECT_ROOT
 from app.core.session import Session
 from app.exceptions.iam_exceptions import IAMError
+from app.model.audit_log_model import AuditAction
 from app.model.user_model import Role
 from app.service import IAMService
 from app.utils.validator import validate_str
@@ -85,7 +86,7 @@ def cmd_user_add(args: argparse.Namespace) -> None:
     service = _service()
     with _logged_in(service, args.as_user) as session:
         # Verifica a permissão antes de pedir a senha do novo usuário.
-        service.sessions.require_role(session, Role.ADMIN)
+        service.require_admin(session, action=AuditAction.USER_CREATE, resource_id=args.username)
         # Ainda não validado pela política de usernames: escapado para o Rich.
         console.print(f"Cadastrando '{escape(args.username)}' ({args.role.value}).")
         info = service.register_user(

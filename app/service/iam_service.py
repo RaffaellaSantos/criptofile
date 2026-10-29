@@ -96,7 +96,10 @@ class IAMService:
 
         if len(failures) > MAX_LOGIN_FAILURES:
             # O bloqueio termina quando a falha mais antiga do grupo bloqueador
-            # (a 4ª mais recente) sai da janela de 60s.
+            # (a 4ª mais recente) sai da janela de 60s. A tentativa bloqueada
+            # também é registrada como falha (abaixo), então tentativas
+            # contínuas empurram o grupo bloqueador para frente e mantêm a conta
+            # bloqueada enquanto o ataque persistir.
             unlock_in = max(
                 1,
                 math.ceil(
@@ -110,6 +113,17 @@ class IAMService:
                 user.username,
                 len(failures),
                 BRUTE_FORCE_WINDOW.total_seconds(),
+            )
+            self.audit.record(
+                AuditAction.LOGIN,
+                user_id=user.user_id,
+                username=user.username,
+                status=AuditStatus.FAIL,
+                details={
+                    "reason": "conta_bloqueada",
+                    "failures": len(failures),
+                    "window_seconds": int(BRUTE_FORCE_WINDOW.total_seconds()),
+                },
             )
             raise AccountLockedError(
                 "Conta temporariamente bloqueada por excesso de falhas de login. "
@@ -207,6 +221,37 @@ class IAMService:
     # ------------------------------------------------------------------ #
     # Cadastro (01.1 + 02.1)
     # ------------------------------------------------------------------ #
+    def require_admin(
+        self,
+        session: Session,
+        *,
+        action: AuditAction,
+        resource_id: str | None = None,
+    ) -> Session:
+        """Exige papel ADMIN e audita a tentativa negada como `action (FAIL)`.
+
+        Usado antes de operações restritas a ADMIN (02.1, 02.2) — inclusive
+        para checagens antecipadas da CLI, para que a tentativa negada
+        chegue ao log de auditoria por qualquer caminho de chamada.
+        """
+        try:
+            return self.sessions.require_role(session, Role.ADMIN)
+        except AuthorizationError:
+            logger.warning(
+                "%s FAIL: '%s' tentou executar a operação sem permissão.",
+                action.value,
+                session.username,
+            )
+            self.audit.record(
+                action,
+                user_id=session.user_id,
+                username=session.username,
+                resource_id=resource_id,
+                status=AuditStatus.FAIL,
+                details={"reason": "acesso negado: papel insuficiente"},
+            )
+            raise
+
     def has_users(self) -> bool:
         with self._db() as db:
             return bool(db.scalar(select(func.count()).select_from(User)))
@@ -231,8 +276,14 @@ class IAMService:
     def register_user(
         self, session: Session, username: str, password: str, role: Role = Role.USER
     ) -> UserInfo:
-        """Cadastra um novo usuário. Apenas ADMIN (Requisito 02.1)."""
-        admin = self.sessions.require_role(session, Role.ADMIN)
+        """Cadastra um novo usuário. Apenas ADMIN (Requisito 02.1).
+
+        A tentativa de usuário sem papel ADMIN também é auditada, como
+        `USER_CREATE (FAIL)` com o motivo do bloqueio.
+        """
+        admin = self.require_admin(
+            session, action=AuditAction.USER_CREATE, resource_id=username
+        )
         info = self._create_user(username, password, Role(role))
         logger.info(
             "USER_CREATE: '%s' (%s) criado por '%s'.",
@@ -286,8 +337,14 @@ class IAMService:
     # Gestão de acesso (02.2)
     # ------------------------------------------------------------------ #
     def set_role(self, session: Session, username: str, role: Role) -> UserInfo:
-        """Altera o papel de um usuário. Apenas ADMIN (Requisito 02.2)."""
-        admin = self.sessions.require_role(session, Role.ADMIN)
+        """Altera o papel de um usuário. Apenas ADMIN (Requisito 02.2).
+
+        A tentativa de usuário sem papel ADMIN também é auditada, como
+        `USER_ROLE_CHANGE (FAIL)` com o motivo do bloqueio.
+        """
+        admin = self.require_admin(
+            session, action=AuditAction.USER_ROLE_CHANGE, resource_id=username
+        )
         role = Role(role)
 
         with self._db() as db:
@@ -330,11 +387,23 @@ class IAMService:
         return info
 
     def list_users(self, session: Session) -> list[UserInfo]:
-        """Lista os usuários cadastrados. Apenas ADMIN."""
-        self.sessions.require_role(session, Role.ADMIN)
+        """Lista os usuários cadastrados. Apenas ADMIN.
+
+        O acesso é auditado nos dois sentidos: tentativa de usuário sem
+        papel ADMIN grava `USER_LIST (FAIL)` com o motivo do bloqueio, e
+        uma listagem bem-sucedida grava `USER_LIST (SUCCESS)`.
+        """
+        self.require_admin(session, action=AuditAction.USER_LIST)
         with self._db() as db:
             users = db.scalars(select(User).order_by(User.created_at)).all()
-            return [_to_info(u) for u in users]
+            infos = [_to_info(u) for u in users]
+        self.audit.record(
+            AuditAction.USER_LIST,
+            user_id=session.user_id,
+            username=session.username,
+            details={"users": len(infos)},
+        )
+        return infos
 
     def get_user(self, session: Session, username: str) -> UserInfo:
         """Consulta um usuário pelo username (ex.: destinatário de compartilhamento)."""
@@ -361,22 +430,7 @@ class IAMService:
         `AUDIT_REPORT (SUCCESS)` e uma tentativa de usuário sem papel ADMIN
         grava `AUDIT_REPORT (FAIL)` com o motivo do bloqueio.
         """
-        try:
-            active = self.sessions.require_role(session, Role.ADMIN)
-        except AuthorizationError:
-            logger.warning(
-                "AUDIT_REPORT FAIL: '%s' tentou ler o relatório sem permissão.",
-                session.username,
-            )
-            self.audit.record(
-                AuditAction.AUDIT_REPORT,
-                user_id=session.user_id,
-                username=session.username,
-                status=AuditStatus.FAIL,
-                details={"reason": "acesso negado: papel insuficiente"},
-            )
-            raise
-
+        active = self.require_admin(session, action=AuditAction.AUDIT_REPORT)
         events = self.audit.list_events(username=username, action_type=action_type)
         self.audit.record(
             AuditAction.AUDIT_REPORT,
